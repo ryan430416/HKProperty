@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="theme-color" content="#132c25" />
   <title>校園財產盤點系統</title>
-  <meta name="description" content="查詢校園財產位置、圖片、財產編號與使用次數。" />
+  <meta name="description" content="依物品類別查詢校園財產，每件物品皆有獨立財產編號。" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -16,7 +16,11 @@
       <button class="nav-item" data-view="frequent"><span>↗</span>高頻使用</button>
       <button class="nav-item" data-view="attention"><span>!</span>待確認物品</button>
     </nav>
-    <div class="side-note"><small>本次盤點進度</small><div><strong id="progressText">75%</strong><span>6 / 8 件</span></div><div class="progress"><i></i></div></div>
+    <div class="side-cats">
+      <small>物品類別</small>
+      <div id="sideCategories"></div>
+    </div>
+    <div class="side-note"><small>本次盤點進度</small><div><strong id="progressText">75%</strong><span id="progressCount">6 / 8 件</span></div><div class="progress"><i id="progressBar"></i></div></div>
   </aside>
 
   <main>
@@ -27,28 +31,45 @@
     </header>
 
     <section class="stats" aria-label="財產統計">
-      <article><span class="stat-icon green">▦</span><div><small>財產總數</small><strong id="totalCount">8</strong><em>件</em></div></article>
-      <article><span class="stat-icon blue">⌖</span><div><small>已確認位置</small><strong id="locatedCount">6</strong><em>件</em></div></article>
-      <article><span class="stat-icon orange">↗</span><div><small>本月使用</small><strong id="monthUses">215</strong><em>次</em></div></article>
-      <article><span class="stat-icon red">!</span><div><small>待確認</small><strong id="attentionCount">2</strong><em>件</em></div></article>
+      <article><span class="stat-icon green">▦</span><div><small>財產總數</small><strong id="totalCount">0</strong><em>件</em></div></article>
+      <article><span class="stat-icon teal">▣</span><div><small>物品類別</small><strong id="categoryCount">0</strong><em>類</em></div></article>
+      <article><span class="stat-icon blue">⌖</span><div><small>已確認位置</small><strong id="locatedCount">0</strong><em>件</em></div></article>
+      <article><span class="stat-icon orange">↗</span><div><small>本月使用</small><strong id="monthUses">0</strong><em>次</em></div></article>
+      <article><span class="stat-icon red">!</span><div><small>待確認</small><strong id="attentionCount">0</strong><em>件</em></div></article>
     </section>
 
     <section class="toolbar">
-      <label class="search"><span>⌕</span><input id="search" placeholder="搜尋物品名稱或財產編號…" /></label>
+      <label class="search"><span>⌕</span><input id="search" placeholder="搜尋物品名稱、類別或財產編號…" /></label>
+      <select id="categoryFilter" aria-label="依類別篩選"><option value="">全部類別</option></select>
       <select id="locationFilter" aria-label="依位置篩選"><option value="">全部位置</option></select>
-      <select id="sortBy" aria-label="排序"><option value="default">預設排序</option><option value="uses">使用次數最多</option><option value="name">物品名稱</option></select>
+      <select id="sortBy" aria-label="排序">
+        <option value="category">依類別分組</option>
+        <option value="code">財產編號</option>
+        <option value="uses">使用次數最多</option>
+        <option value="name">物品名稱</option>
+      </select>
     </section>
 
-    <div class="section-head"><div><h2>物品清單</h2><p id="resultText">顯示全部 8 件財產</p></div><div class="view-toggle"><button class="active" aria-label="卡片檢視">▦</button><button aria-label="列表檢視">☷</button></div></div>
-    <section class="asset-grid" id="assetGrid"></section>
+    <div class="chips" id="categoryChips" aria-label="快速篩選類別"></div>
+
+    <div class="section-head">
+      <div><h2>物品清單</h2><p id="resultText">依類別檢視</p></div>
+      <div class="view-toggle">
+        <button class="active" data-layout="grid" aria-label="卡片檢視">▦</button>
+        <button data-layout="list" aria-label="列表檢視">☷</button>
+      </div>
+    </div>
+    <section class="asset-board" id="assetBoard"></section>
   </main>
 
   <dialog id="editDialog">
     <form method="dialog" id="editForm">
       <div class="dialog-head"><div><p class="eyebrow">快速盤點</p><h2 id="dialogTitle">更新財產</h2></div><button value="cancel" class="icon-btn" aria-label="關閉">×</button></div>
       <input type="hidden" id="editId" />
+      <label>物品類別<input id="editCategory" list="categoryList" placeholder="例如：筆記型電腦" required /></label>
+      <datalist id="categoryList"></datalist>
       <label>物品名稱<input id="editName" required /></label>
-      <label>財產編號<input id="editCode" required /></label>
+      <label>財產編號<input id="editCode" placeholder="每件物品各自獨立" required /></label>
       <label>目前位置<input id="editLocation" required /></label>
       <label>物品圖片網址<input id="editImage" placeholder="https://…" /></label>
       <div class="dialog-actions"><button value="cancel" class="secondary">取消</button><button value="default" class="primary">儲存資料</button></div>
