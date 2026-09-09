@@ -13,7 +13,9 @@
     <div class="brand"><span class="brand-mark">校</span><div><strong>校園盤點</strong><small>ASSET TRACKER</small></div></div>
     <nav>
       <button class="nav-item active" data-view="all"><span>▦</span>財產總覽</button>
-      <button class="nav-item" data-view="frequent"><span>↗</span>高頻使用</button>
+      <button class="nav-item" data-view="logs"><span>☰</span>使用紀錄</button>
+      <button class="nav-item" data-view="loaned"><span>↗</span>目前外借</button>
+      <button class="nav-item" data-view="frequent"><span>✦</span>高頻使用</button>
       <button class="nav-item" data-view="attention"><span>!</span>待確認物品</button>
     </nav>
     <div class="side-cats">
@@ -33,13 +35,13 @@
     <section class="stats" aria-label="財產統計">
       <article><span class="stat-icon green">▦</span><div><small>財產總數</small><strong id="totalCount">0</strong><em>件</em></div></article>
       <article><span class="stat-icon teal">▣</span><div><small>物品類別</small><strong id="categoryCount">0</strong><em>類</em></div></article>
-      <article><span class="stat-icon blue">⌖</span><div><small>已確認位置</small><strong id="locatedCount">0</strong><em>件</em></div></article>
-      <article><span class="stat-icon orange">↗</span><div><small>本月使用</small><strong id="monthUses">0</strong><em>次</em></div></article>
+      <article><span class="stat-icon orange">↗</span><div><small>目前外借</small><strong id="loanedCount">0</strong><em>件</em></div></article>
+      <article><span class="stat-icon blue">☰</span><div><small>本月借出</small><strong id="monthUses">0</strong><em>次</em></div></article>
       <article><span class="stat-icon red">!</span><div><small>待確認</small><strong id="attentionCount">0</strong><em>件</em></div></article>
     </section>
 
     <section class="toolbar">
-      <label class="search"><span>⌕</span><input id="search" placeholder="搜尋物品名稱、類別或財產編號…" /></label>
+      <label class="search"><span>⌕</span><input id="search" placeholder="搜尋物品、財產編號、使用人或借出人…" /></label>
       <select id="categoryFilter" aria-label="依類別篩選"><option value="">全部類別</option></select>
       <select id="locationFilter" aria-label="依位置篩選"><option value="">全部位置</option></select>
       <select id="sortBy" aria-label="排序">
@@ -75,6 +77,44 @@
       <div class="dialog-actions"><button value="cancel" class="secondary">取消</button><button value="default" class="primary">儲存資料</button></div>
     </form>
   </dialog>
+  <dialog id="logDialog" class="wide">
+    <div class="dialog-head">
+      <div><p class="eyebrow">借入借出時間軸</p><h2 id="logTitle">使用紀錄</h2></div>
+      <button class="icon-btn" data-close="logDialog" aria-label="關閉">×</button>
+    </div>
+    <p class="log-meta" id="logMeta"></p>
+    <div class="log-actions">
+      <button class="primary" id="logBorrowBtn">登記借出</button>
+      <button class="secondary" id="logReturnBtn">登記歸還</button>
+    </div>
+    <ol class="timeline" id="timeline"></ol>
+  </dialog>
+
+  <dialog id="loanDialog">
+    <form id="loanForm">
+      <div class="dialog-head">
+        <div><p class="eyebrow" id="loanEyebrow">使用紀錄</p><h2 id="loanTitle">登記借出</h2></div>
+        <button type="button" class="icon-btn" data-close="loanDialog" aria-label="關閉">×</button>
+      </div>
+      <input type="hidden" id="loanAssetId" />
+      <input type="hidden" id="loanMode" />
+      <p class="log-meta" id="loanSummary"></p>
+      <div id="loanBorrowFields">
+        <label>使用人<input id="loanBorrower" list="peopleList" placeholder="實際使用／借入者" required /></label>
+        <label>借出人<input id="loanLender" list="peopleList" placeholder="經手借出的管理人" required /></label>
+        <label>借出時間<input type="datetime-local" id="loanBorrowedAt" required /></label>
+      </div>
+      <div id="loanReturnFields" hidden>
+        <label>歸還時間<input type="datetime-local" id="loanReturnedAt" /></label>
+      </div>
+      <datalist id="peopleList"></datalist>
+      <div class="dialog-actions">
+        <button type="button" class="secondary" data-close="loanDialog">取消</button>
+        <button class="primary" id="loanSubmit">確認</button>
+      </div>
+    </form>
+  </dialog>
+
   <div class="toast" id="toast" role="status"></div>
   <script src="app.js"></script>
 </body>
