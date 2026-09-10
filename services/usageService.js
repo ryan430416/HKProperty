@@ -1,49 +1,58 @@
-import { STORAGE_KEYS, readStore, writeStore } from './storageService.js';
-import { incrementUseCount } from './inventoryService.js';
+import { requireClient, throwIfError } from './supabaseClient.js';
+import { getItem, loadCatalog } from './inventoryService.js';
 import { isCurrentMonth } from '../js/format.js';
 
-function all() {
-  return readStore(STORAGE_KEYS.usage, []);
+let cache = [];
+
+export function mapUsage(row, item) {
+  return {
+    id: row.id,
+    propertyId: item?.propertyId || row.property_id,
+    assetId: row.asset_id,
+    userName: row.user_name,
+    department: row.department,
+    usedAt: row.used_at,
+    purpose: row.purpose,
+    note: row.note || '',
+    loanId: row.loan_id
+  };
 }
 
-function save(list) {
-  writeStore(STORAGE_KEYS.usage, list);
+export async function loadUsage() {
+  const client = requireClient();
+  const { data, error } = await client
+    .from('usage_records')
+    .select('*')
+    .order('used_at', { ascending: false });
+  throwIfError(error, '無法載入使用紀錄');
+  cache = (data || []).map((row) => mapUsage(row, getItem(row.asset_id)));
+  return cache;
 }
 
 export function listUsage(propertyId) {
-  const logs = all().slice().sort((a, b) => new Date(b.usedAt) - new Date(a.usedAt));
+  const logs = cache.slice();
   if (!propertyId) return logs;
-  return logs.filter((log) => log.propertyId === propertyId);
+  return logs.filter((log) => log.propertyId === propertyId || log.assetId === propertyId);
 }
 
-export function addUsage({ propertyId, userName, department, usedAt, purpose, note, loanId = null, countUsage = true }) {
-  if (!propertyId) throw new Error('缺少財產編號');
-  if (!userName?.trim()) throw new Error('請填寫使用人');
-  if (!department?.trim()) throw new Error('請填寫使用單位');
-  if (!usedAt) throw new Error('請填寫使用日期與時間');
-  if (!purpose?.trim()) throw new Error('請填寫使用用途');
-
-  const usedDate = new Date(usedAt);
-  if (Number.isNaN(usedDate.getTime())) throw new Error('使用時間格式不正確');
-
-  const entry = {
-    id: `use-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    propertyId,
-    userName: userName.trim(),
-    department: department.trim(),
-    usedAt: usedDate.toISOString(),
-    purpose: purpose.trim(),
-    note: (note || '').trim(),
-    loanId
-  };
-
-  const list = all();
-  list.push(entry);
-  save(list);
-  const item = countUsage ? incrementUseCount(propertyId) : null;
-  return { entry, item };
+export async function addUsage({ propertyId, userName, department, usedAt, purpose, note }) {
+  const item = getItem(propertyId);
+  if (!item) throw new Error('找不到財產');
+  const client = requireClient();
+  const { data, error } = await client.rpc('record_asset_usage', {
+    p_asset_id: item.id,
+    p_user_name: userName,
+    p_department: department,
+    p_used_at: new Date(usedAt).toISOString(),
+    p_purpose: purpose,
+    p_note: note || null
+  });
+  throwIfError(error, '現場使用登記失敗');
+  await loadCatalog();
+  await loadUsage();
+  return { entry: mapUsage(data, item), item: getItem(propertyId) };
 }
 
 export function monthUsageCount() {
-  return all().filter((log) => isCurrentMonth(log.usedAt)).length;
+  return cache.filter((log) => isCurrentMonth(log.usedAt)).length;
 }

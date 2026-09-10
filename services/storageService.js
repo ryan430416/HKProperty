@@ -1,129 +1,72 @@
-const LEGACY = {
-  overrides: 'hkproperty.overrides',
-  usage: 'hkproperty.usageLogs',
-  audits: 'hkproperty.auditLogs',
-  locations: 'hkproperty.locationLogs'
-};
+import { requireClient, throwIfError } from './supabaseClient.js';
+import { isStaff } from './authService.js';
 
-export const STORAGE_KEYS = {
-  overrides: 'hkproperty_asset_overrides',
-  loans: 'hkproperty_loan_records',
-  usage: 'hkproperty_usage_records',
-  audits: 'hkproperty_audit_records',
-  locations: 'hkproperty_location_records',
-  images: 'hkproperty_images',
-  activity: 'hkproperty_activity_records'
-};
+const BUCKET = 'asset-images';
+const ALLOWED = ['image/jpeg', 'image/png', 'image/webp'];
+const MAX_BYTES = 5 * 1024 * 1024;
 
-function parse(raw, fallback) {
-  if (!raw) return fallback;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return fallback;
+function extOf(mime) {
+  if (mime === 'image/png') return 'png';
+  if (mime === 'image/webp') return 'webp';
+  return 'jpg';
+}
+
+export function publicImageUrl(path) {
+  if (!path) return '';
+  const client = requireClient();
+  const { data } = client.storage.from(BUCKET).getPublicUrl(path);
+  return data?.publicUrl || '';
+}
+
+export async function listAssetImages(assetId) {
+  const client = requireClient();
+  const { data, error } = await client
+    .from('asset_images')
+    .select('*')
+    .eq('asset_id', assetId)
+    .order('created_at', { ascending: false });
+  throwIfError(error, '無法載入圖片');
+  return (data || []).map((row) => ({
+    ...row,
+    url: publicImageUrl(row.storage_path)
+  }));
+}
+
+export async function uploadAssetImage(assetId, file) {
+  if (!isStaff()) throw new Error('只有經辦人員或管理者可以上傳圖片');
+  if (!file) throw new Error('請先選擇圖片');
+  if (!ALLOWED.includes(file.type)) throw new Error('僅支援 JPG、PNG、WebP');
+  if (file.size > MAX_BYTES) throw new Error('檔案大小不可超過 5 MB');
+
+  const client = requireClient();
+  const ext = extOf(file.type);
+  const path = `assets/${assetId}/${crypto.randomUUID()}.${ext}`;
+  const { error: uploadError } = await client.storage.from(BUCKET).upload(path, file, {
+    upsert: false,
+    contentType: file.type
+  });
+  throwIfError(uploadError, '圖片上傳失敗');
+
+  const { error: dbError } = await client.from('asset_images').insert({
+    asset_id: assetId,
+    storage_path: path,
+    is_primary: true,
+    mime_type: file.type
+  });
+  if (dbError) {
+    await client.storage.from(BUCKET).remove([path]);
+    throwIfError(dbError, '圖片紀錄寫入失敗');
   }
+  return publicImageUrl(path);
 }
 
-export function readStore(key, fallback) {
-  return parse(localStorage.getItem(key), fallback);
-}
-
-export function writeStore(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
-}
-
-export function uid(prefix = 'id') {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function migrateList(oldKey, newKey) {
-  const next = readStore(newKey, null);
-  if (next) return;
-  const old = readStore(oldKey, null);
-  if (Array.isArray(old)) writeStore(newKey, old);
-}
-
-function migrateOverridesAndImages() {
-  const hasNew = localStorage.getItem(STORAGE_KEYS.overrides);
-  if (hasNew) return;
-  const old = readStore(LEGACY.overrides, {});
-  if (!old || typeof old !== 'object') return;
-  const overrides = {};
-  const images = readStore(STORAGE_KEYS.images, {});
-  for (const [id, value] of Object.entries(old)) {
-    const copy = { ...(value || {}) };
-    if (copy.image) {
-      images[id] = copy.image;
-      delete copy.image;
-    }
-    overrides[id] = copy;
+export async function deleteAssetImage(imageRow) {
+  if (!isStaff()) throw new Error('只有經辦人員或管理者可以刪除圖片');
+  const client = requireClient();
+  if (imageRow.storage_path) {
+    const { error } = await client.storage.from(BUCKET).remove([imageRow.storage_path]);
+    throwIfError(error, '無法刪除圖片檔案');
   }
-  writeStore(STORAGE_KEYS.overrides, overrides);
-  writeStore(STORAGE_KEYS.images, images);
-}
-
-export function migrateLegacyStorage() {
-  migrateOverridesAndImages();
-  migrateList(LEGACY.usage, STORAGE_KEYS.usage);
-  migrateList(LEGACY.audits, STORAGE_KEYS.audits);
-  migrateList(LEGACY.locations, STORAGE_KEYS.locations);
-  if (!localStorage.getItem(STORAGE_KEYS.loans)) writeStore(STORAGE_KEYS.loans, []);
-  if (!localStorage.getItem(STORAGE_KEYS.images)) writeStore(STORAGE_KEYS.images, {});
-  if (!localStorage.getItem(STORAGE_KEYS.activity)) writeStore(STORAGE_KEYS.activity, []);
-}
-
-export function restoreAppStorage(snap) {
-  for (const key of Object.values(STORAGE_KEYS)) {
-    if (snap[key] == null) localStorage.removeItem(key);
-    else localStorage.setItem(key, snap[key]);
-  }
-}
-
-export function snapshotAppStorage() {
-  const snap = {};
-  for (const key of Object.values(STORAGE_KEYS)) {
-    snap[key] = localStorage.getItem(key);
-  }
-  return snap;
-}
-
-export function storageUsageBytes() {
-  let chars = 0;
-  const details = [];
-  for (const [name, key] of Object.entries(STORAGE_KEYS)) {
-    const raw = localStorage.getItem(key) || '';
-    chars += raw.length;
-    details.push({ name, key, bytes: raw.length * 2 });
-  }
-  return { bytes: chars * 2, details };
-}
-
-export function exportOperationalJson() {
-  const data = {};
-  for (const [name, key] of Object.entries(STORAGE_KEYS)) {
-    data[name] = readStore(key, key.includes('image') || name === 'overrides' ? {} : []);
-  }
-  return {
-    exportedAt: new Date().toISOString(),
-    note: '不含原始財產清冊 inventory.json',
-    data
-  };
-}
-
-export function importOperationalJson(payload) {
-  const bundle = payload?.data || payload;
-  if (!bundle || typeof bundle !== 'object') throw new Error('匯入資料格式不正確');
-  for (const [name, key] of Object.entries(STORAGE_KEYS)) {
-    if (bundle[name] !== undefined) writeStore(key, bundle[name]);
-  }
-}
-
-export function clearOperationalData() {
-  writeStore(STORAGE_KEYS.loans, []);
-  writeStore(STORAGE_KEYS.usage, []);
-  writeStore(STORAGE_KEYS.audits, []);
-  writeStore(STORAGE_KEYS.locations, []);
-  writeStore(STORAGE_KEYS.images, {});
-  writeStore(STORAGE_KEYS.activity, []);
-  writeStore(STORAGE_KEYS.overrides, {});
+  const { error } = await client.from('asset_images').delete().eq('id', imageRow.id);
+  throwIfError(error, '無法刪除圖片紀錄');
 }

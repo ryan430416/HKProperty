@@ -27,36 +27,51 @@ import {
   locationRanking,
   saveImage
 } from '../services/inventoryService.js';
-import { addUsage, listUsage } from '../services/usageService.js';
-import { addAudit, confirmLocationUpdate, listAudits, listLocationChanges } from '../services/auditService.js';
-import { runLoanLifecycleTest } from '../services/loanFlowTest.js';
-import { runSelfServiceFlowTest } from '../services/selfServiceFlowTest.js';
+import { addUsage, listUsage, loadUsage } from '../services/usageService.js';
+import { addAudit, confirmLocationUpdate, listAudits, listLocationChanges, loadAudits, loadLocationHistory } from '../services/auditService.js';
 import {
   CHECKOUT_METHOD,
   RETURN_RESULT,
+  approveLoan,
   checkin,
   checkout,
   checkoutMethodLabel,
+  completeCheckout,
   currentLoanOf,
   displayLoanStatus,
   exportLoansCsv,
   getLoan,
   getLoanDashboardStats,
   getOpenLoan,
+  getSettings,
   isDueToday,
   isDueWithinHours,
   isLoanOverdue,
   isOpenLoan,
   listLoans,
+  loadLoans,
+  loadOperationLogs,
+  loadSettings,
   overdueDuration,
-  refreshOverdueStatus
+  refreshOverdueStatus,
+  rejectLoan,
+  saveSettings
 } from '../services/loanService.js';
 import {
-  clearOperationalData,
-  exportOperationalJson,
-  importOperationalJson,
-  storageUsageBytes
-} from '../services/storageService.js';
+  adminUpdateProfile,
+  getProfile,
+  initAuth,
+  isAdmin,
+  isStaff,
+  listProfiles,
+  roleLabel,
+  sendLoginOtp,
+  signOut,
+  updateMyProfile,
+  verifyEmailOtp
+} from '../services/authService.js';
+import { getSupabaseConfigError } from '../services/supabaseClient.js';
+import { clearLegacyLocalData, detectLegacyLocalData } from '../services/legacyLocalData.js';
 
 const PAGE_META = {
   dashboard: ['財產管理', '系統總覽'],
@@ -67,6 +82,8 @@ const PAGE_META = {
   audit: ['盤點作業', '盤點作業'],
   usage: ['使用管理', '使用紀錄'],
   locations: ['位置資料', '位置管理'],
+  logs: ['系統維護', '操作紀錄'],
+  users: ['系統維護', '使用者管理'],
   settings: ['系統維護', '系統設定']
 };
 
@@ -90,6 +107,39 @@ function $(id) {
 
 function imageOf(item) {
   return item?.image || PLACEHOLDER_IMAGE;
+}
+
+async function refreshData() {
+  await Promise.all([
+    loadCatalog(),
+    loadLoans(),
+    loadSettings(),
+    loadUsage().catch(() => []),
+    loadAudits(),
+    loadLocationHistory()
+  ]);
+  refreshOverdueStatus();
+}
+
+function applyRoleNav() {
+  const staff = isStaff();
+  const admin = isAdmin();
+  document.querySelectorAll('[data-min-role]').forEach((el) => {
+    const need = el.dataset.minRole;
+    const ok = need === 'admin' ? admin : staff;
+    el.hidden = !ok;
+  });
+  const profile = getProfile();
+  $('userName').textContent = profile?.display_name || '使用者';
+  $('userRole').textContent = roleLabel(profile?.role);
+  $('userAvatar').textContent = (profile?.display_name || '用').slice(0, 1);
+  $('logoutBtn').hidden = !profile;
+}
+
+function showAuthGate(on) {
+  $('authGate').hidden = !on;
+  $('main').hidden = on;
+  document.querySelector('.sidebar')?.classList.toggle('signed-out', on);
 }
 
 function currentFilters() {
@@ -222,6 +272,7 @@ function renderDashboard() {
   $('statGrid').innerHTML = [
     ['財產總數', stats.total, '件'],
     ['可借用', stats.available, '件'],
+    ['待核准', stats.approvalPending, '件'],
     ['已借出', stats.checkedOut, '件'],
     ['今日應歸還', loanStats.dueToday, '件'],
     ['逾期未還', loanStats.overdue, '件'],
@@ -333,7 +384,14 @@ function loanRowHTML(loan) {
       </div>
       <div class="card-actions">
         <button type="button" class="link-btn" data-open-item="${esc(loan.propertyId)}">查看</button>
-        <button type="button" class="primary" data-checkin="${esc(loan.propertyId)}">辦理歸還</button>
+        ${loan.rawStatus === 'pending' ? `
+          <button type="button" class="primary" data-approve="${esc(loan.id)}">核准</button>
+          <button type="button" class="secondary" data-reject="${esc(loan.id)}">拒絕</button>
+        ` : loan.rawStatus === 'approved' ? `
+          <button type="button" class="primary" data-complete-checkout="${esc(loan.id)}">辦理借出</button>
+        ` : `
+          <button type="button" class="primary" data-checkin="${esc(loan.propertyId)}">辦理歸還</button>
+        `}
       </div>
     </div>
   `;
@@ -345,6 +403,7 @@ function renderLoans() {
   const loanStats = getLoanDashboardStats();
   $('loanStatGrid').innerHTML = [
     ['可借用財產', stats.available, '件'],
+    ['待核准', stats.approvalPending || loanStats.pending, '件'],
     ['已借出', stats.checkedOut, '件'],
     ['今日應歸還', loanStats.dueToday, '件'],
     ['逾期未還', loanStats.overdue, '件'],
@@ -357,8 +416,12 @@ function renderLoans() {
   const mode = $('loanStatusFilter').value;
   let title = '目前借出中';
   let rows = [];
+  let loans = [];
 
-  if (mode === 'available' || mode === 'maintenance') {
+  if (mode === 'pending') {
+    title = '待核准申請';
+    loans = listLoans().filter((loan) => loan.rawStatus === 'pending');
+  } else if (mode === 'available' || mode === 'maintenance') {
     title = mode === 'available' ? '可借用財產' : '維修中財產';
     rows = listItems().filter((item) => item.availabilityStatus === mode).filter((item) => {
       if (!q) return true;
@@ -388,18 +451,20 @@ function renderLoans() {
     return;
   }
 
-  let loans = listLoans().filter((loan) => isOpenLoan(loan));
-  if (mode === 'checked_out') {
-    title = '已借出';
-    loans = loans.filter((loan) => !isLoanOverdue(loan));
-  } else if (mode === 'overdue') {
-    title = '逾期未還';
-    loans = loans.filter((loan) => isLoanOverdue(loan));
-  } else if (mode === 'dueSoon') {
-    title = '即將到期（24 小時內）';
-    loans = loans.filter((loan) => isDueWithinHours(loan, 24) || isDueToday(loan));
-  } else {
-    title = '目前借出中';
+  if (mode !== 'pending') {
+    loans = listLoans().filter((loan) => isOpenLoan(loan));
+    if (mode === 'checked_out') {
+      title = '已借出';
+      loans = loans.filter((loan) => !isLoanOverdue(loan));
+    } else if (mode === 'overdue') {
+      title = '逾期未還';
+      loans = loans.filter((loan) => isLoanOverdue(loan));
+    } else if (mode === 'dueSoon') {
+      title = '即將到期（24 小時內）';
+      loans = loans.filter((loan) => isDueWithinHours(loan, 24) || isDueToday(loan));
+    } else {
+      title = '目前借出中';
+    }
   }
   if (q) {
     loans = loans.filter((loan) => [loan.propertyId, loan.propertyName, loan.borrowerName, loan.borrowerDepartment, loan.id].join(' ').toLowerCase().includes(q));
@@ -426,6 +491,7 @@ function filteredHistoryLoans() {
     if (propertyId && loan.propertyId !== propertyId) return false;
     if (borrower && !loan.borrowerName.toLowerCase().includes(borrower)) return false;
     const shown = displayLoanStatus(loan);
+    if (status === 'pending' && shown !== '待核准') return false;
     if (status === 'checked_out' && shown !== '借用中') return false;
     if (status === 'overdue' && shown !== '已逾期') return false;
     if (status === 'returned' && shown !== '已歸還') return false;
@@ -539,9 +605,71 @@ function renderLocations() {
 }
 
 function renderSettings() {
-  const usage = storageUsageBytes();
-  const kb = (usage.bytes / 1024).toFixed(1);
-  $('storageUsageText').textContent = `目前 localStorage 約使用 ${kb} KB（瀏覽器上限通常約 5 MB）。原始 390 筆財產清冊不在此儲存空間內。`;
+  const profile = getProfile();
+  if ($('profileName')) $('profileName').value = profile?.display_name || '';
+  if ($('profileSchool')) $('profileSchool').value = profile?.school_number || '';
+  if ($('profileDept')) $('profileDept').value = profile?.department || '';
+  const settings = getSettings();
+  $('systemSettingsPanel').hidden = !isAdmin();
+  if (isAdmin()) {
+    $('settingRequireApproval').checked = Boolean(settings.require_loan_approval);
+    $('settingAllowSelf').checked = Boolean(settings.allow_self_checkout);
+    $('settingLoanDays').value = settings.default_loan_days || 1;
+  }
+  const legacy = detectLegacyLocalData();
+  $('legacyDataText').textContent = legacy.found
+    ? `偵測到舊版測試資料（約 ${(legacy.bytes / 1024).toFixed(1)} KB）。可清除本機資料，不會上傳到雲端。`
+    : '沒有偵測到舊版 localStorage 測試資料。';
+}
+
+async function renderUsers() {
+  if (!isAdmin()) {
+    $('userManageList').innerHTML = '<div class="empty">只有管理者可以管理使用者</div>';
+    return;
+  }
+  try {
+    const rows = await listProfiles();
+    $('userManageList').innerHTML = rows.map((row) => `
+      <div class="audit-item">
+        <div>
+          <strong>${esc(row.display_name || '未命名')}</strong>
+          <div class="muted">${esc(row.school_number || '未填學號')} · ${esc(row.department || '未填單位')}</div>
+          <div class="muted">${row.is_active ? '啟用中' : '已停用'}</div>
+        </div>
+        <select data-role-user="${esc(row.id)}">
+          <option value="borrower" ${row.role === 'borrower' ? 'selected' : ''}>借用人</option>
+          <option value="staff" ${row.role === 'staff' ? 'selected' : ''}>經辦人員</option>
+          <option value="admin" ${row.role === 'admin' ? 'selected' : ''}>管理者</option>
+        </select>
+        <button type="button" class="secondary" data-toggle-user="${esc(row.id)}" data-active="${row.is_active ? '1' : '0'}">${row.is_active ? '停用' : '啟用'}</button>
+      </div>
+    `).join('') || '<div class="empty">尚無使用者</div>';
+  } catch (error) {
+    $('userManageList').innerHTML = `<div class="empty">${esc(error.message)}</div>`;
+  }
+}
+
+async function renderLogs() {
+  if (!isStaff()) {
+    $('operationLogList').innerHTML = '<div class="empty">沒有權限查看操作紀錄</div>';
+    return;
+  }
+  try {
+    const rows = await loadOperationLogs();
+    $('operationLogList').innerHTML = rows.length
+      ? rows.map((row) => `
+        <div class="log-item">
+          <div>
+            <strong>${esc(row.action)}</strong>
+            <div class="muted">${esc(row.actor_name || '系統')} · ${esc(formatDateTime(row.created_at))}</div>
+            <div class="muted">${esc(JSON.stringify(row.detail || {}))}</div>
+          </div>
+        </div>
+      `).join('')
+      : '<div class="empty">尚無操作紀錄</div>';
+  } catch (error) {
+    $('operationLogList').innerHTML = `<div class="empty">${esc(error.message)}</div>`;
+  }
 }
 
 function renderNotify() {
@@ -573,6 +701,8 @@ function render() {
   if (state.view === 'audit') renderAuditPage();
   if (state.view === 'usage') renderUsagePage();
   if (state.view === 'locations') renderLocations();
+  if (state.view === 'logs') renderLogs();
+  if (state.view === 'users') renderUsers();
   if (state.view === 'settings') renderSettings();
 }
 
@@ -601,44 +731,44 @@ function openItem(propertyId) {
     : item.returnAlert === 'missing_parts'
       ? '<div class="warn-banner">此財產最近歸還時配件缺少，請管理者後續處理。</div>'
       : '';
-  $('detailTitle').textContent = item.name;
-  $('detailBody').innerHTML = `
-    <div class="detail-photo"><img src="${esc(imageOf(item))}" alt="${esc(item.name)}"></div>
-    ${alert}
-    <dl>
-      ${[
+  const fields = [
         ['財產名稱', item.name],
         ['財產編號', item.propertyId],
         ['目前位置', displayValue(item.location)],
         ['保管單位', displayValue(item.department)],
-        ['保管人', displayValue(item.custodian)],
+        isStaff() ? ['保管人', displayValue(item.custodian)] : null,
         ['規格', displayValue(item.specification)],
         ['單位', displayValue(item.unit)],
-        ['單價', formatPrice(item.price)],
-        ['購買日期', formatDate(item.purchaseDate)],
-        ['使用年限', Number.isFinite(item.serviceLife) ? `${item.serviceLife} 年` : '未提供'],
-        ['廠商', displayValue(item.supplier)],
+        isStaff() ? ['單價', formatPrice(item.price)] : null,
+        isStaff() ? ['購買日期', formatDate(item.purchaseDate)] : null,
+        isStaff() ? ['使用年限', Number.isFinite(item.serviceLife) ? `${item.serviceLife} 年` : '未提供'] : null,
+        isStaff() ? ['廠商', displayValue(item.supplier)] : null,
         ['廠牌', displayValue(item.brand)],
         ['型號', displayValue(item.model)],
         ['財產狀態', item.availabilityStatus === AVAILABILITY.LOST ? '異常' : displayValue(item.status)],
         ['借用狀態', item.availabilityLabel],
-        ['目前借用人', loan && isOpenLoan(loan) ? loan.borrowerName : '—'],
+        isStaff() ? ['目前借用人', loan && isOpenLoan(loan) ? loan.borrowerName : '—'] : null,
         ['借出時間', loan && isOpenLoan(loan) ? formatDateTime(loan.checkedOutAt) : '—'],
         ['預計歸還時間', loan && isOpenLoan(loan) ? formatDateTime(loan.expectedReturnAt) : '—'],
         ['借用用途', loan && isOpenLoan(loan) ? loan.purpose : '—'],
         ['使用次數', String(item.useCount)],
-        ['最後盤點時間', item.lastAuditAt ? formatDateTime(item.lastAuditAt) : '尚未盤點'],
-        ['盤點狀態', item.auditStatus],
+        isStaff() ? ['最後盤點時間', item.lastAuditAt ? formatDateTime(item.lastAuditAt) : '尚未盤點'] : null,
+        isStaff() ? ['盤點狀態', item.auditStatus] : null,
         ['備註', displayValue(item.note)]
-      ].map(([k, v]) => `<div class="kv"><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}
+      ].filter(Boolean);
+  $('detailBody').innerHTML = `
+    <div class="detail-photo"><img src="${esc(imageOf(item))}" alt="${esc(item.name)}"></div>
+    ${alert}
+    <dl>
+      ${fields.map(([k, v]) => `<div class="kv"><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}
     </dl>
     <div class="action-grid">
-      ${loanActionButtons(item)}
-      <button type="button" class="secondary" data-usage="${esc(item.propertyId)}">現場使用登記</button>
+      ${isStaff() ? loanActionButtons(item) : `<button type="button" class="primary" data-self="borrow">前往自助借用</button>`}
+      ${isStaff() ? `<button type="button" class="secondary" data-usage="${esc(item.propertyId)}">現場使用登記</button>
       <button type="button" class="primary" data-audit="${esc(item.propertyId)}">執行盤點</button>
       <button type="button" class="secondary" data-location="${esc(item.propertyId)}">更新位置</button>
       <button type="button" class="secondary" data-image="${esc(item.propertyId)}">上傳圖片</button>
-      <button type="button" class="secondary" data-history="${esc(item.propertyId)}">查看紀錄</button>
+      <button type="button" class="secondary" data-history="${esc(item.propertyId)}">查看紀錄</button>` : ''}
     </div>
     <div class="action-hint">
       <p><strong>辦理借出：</strong>物品會離開原存放地點，需要辦理歸還。</p>
@@ -891,7 +1021,8 @@ function lookupScan(raw) {
   toast(`已找到「${item.name}」，目前狀態：${item.availabilityLabel}`);
 }
 
-function afterMutation(propertyId, message) {
+async function afterMutation(propertyId, message) {
+  await refreshData();
   render();
   if (propertyId) {
     state.returnToDetailId = propertyId;
@@ -932,7 +1063,12 @@ function downloadCsv() {
 function bindEvents() {
   bindDialogBehavior(restoreDetailAfterClose);
   bindConfirmDialog();
-  bindSelfService({ onChanged: () => render() });
+  bindSelfService({
+    onChanged: async () => {
+      await refreshData();
+      render();
+    }
+  });
   document.addEventListener('click', (event) => {
     const closer = event.target.closest('[data-close]');
     if (closer) {
@@ -964,6 +1100,56 @@ function bindEvents() {
     const checkinBtn = event.target.closest('[data-checkin]');
     if (checkinBtn) {
       openCheckin(checkinBtn.dataset.checkin);
+      return;
+    }
+    const approveBtn = event.target.closest('[data-approve]');
+    if (approveBtn) {
+      confirmAction({
+        title: '核准借用申請',
+        text: '確定核准此筆借用申請？',
+        confirmLabel: '確認核准'
+      }).then(async (ok) => {
+        if (!ok) return;
+        try {
+          await approveLoan(approveBtn.dataset.approve);
+          await afterMutation(null, '已核准借用申請');
+        } catch (error) {
+          toast(error.message || '核准失敗', 'error');
+        }
+      });
+      return;
+    }
+    const rejectBtn = event.target.closest('[data-reject]');
+    if (rejectBtn) {
+      $('rejectLoanId').value = rejectBtn.dataset.reject;
+      $('rejectReason').value = '';
+      openExclusiveDialog('rejectDialog');
+      return;
+    }
+    const completeBtn = event.target.closest('[data-complete-checkout]');
+    if (completeBtn) {
+      completeCheckout(completeBtn.dataset.completeCheckout)
+        .then((result) => afterMutation(result.item.propertyId, '已完成借出'))
+        .catch((error) => toast(error.message || '借出失敗', 'error'));
+      return;
+    }
+    const toggleUser = event.target.closest('[data-toggle-user]');
+    if (toggleUser) {
+      const active = toggleUser.dataset.active === '1';
+      confirmAction({
+        title: active ? '停用使用者' : '啟用使用者',
+        text: active ? '停用後此帳號將無法登入。' : '確定重新啟用此帳號？',
+        confirmLabel: active ? '確認停用' : '確認啟用'
+      }).then(async (ok) => {
+        if (!ok) return;
+        try {
+          await adminUpdateProfile({ id: toggleUser.dataset.toggleUser, isActive: !active });
+          await renderUsers();
+          toast(active ? '已停用使用者' : '已啟用使用者');
+        } catch (error) {
+          toast(error.message || '更新失敗', 'error');
+        }
+      });
       return;
     }
     const loanDetailBtn = event.target.closest('[data-loan-detail]');
@@ -1133,20 +1319,20 @@ function bindEvents() {
     }
   });
 
-  $('checkoutConfirmForm').addEventListener('submit', (event) => {
+  $('checkoutConfirmForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     const btn = event.submitter || $('checkoutConfirmForm').querySelector('button[type="submit"]');
     if (btn) btn.disabled = true;
     try {
       if (!state.pendingCheckout) throw new Error('找不到待確認的借出資料');
-      const { item } = checkout({
+      const { item } = await checkout({
         ...state.pendingCheckout,
         checkoutMethod: CHECKOUT_METHOD.ADMIN
       });
       state.pendingCheckout = null;
       closeDialog('checkoutConfirmDialog', { silent: true });
       closeDialog('checkoutDialog', { silent: true });
-      afterMutation(item.propertyId, '已完成借出，使用次數已更新');
+      await afterMutation(item.propertyId, '已完成借出，使用次數已更新');
     } catch (error) {
       toast(error.message || '借出失敗', 'error');
     } finally {
@@ -1154,11 +1340,13 @@ function bindEvents() {
     }
   });
 
-  $('checkinForm').addEventListener('submit', (event) => {
+  $('checkinForm').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const btn = event.submitter || $('checkinForm').querySelector('button[type="submit"]');
+    if (btn) btn.disabled = true;
     try {
       const result = document.querySelector('input[name="checkinResult"]:checked')?.value;
-      const outcome = checkin({
+      const outcome = await checkin({
         propertyId: $('checkinPropertyId').value,
         returnedAt: $('checkinAt').value,
         returnOperator: $('checkinOperator').value,
@@ -1173,16 +1361,18 @@ function bindEvents() {
       if (result === RETURN_RESULT.LOST) message = '已登記遺失，財產狀態改為異常';
       if (result === RETURN_RESULT.DAMAGED) message = '已歸還，請注意此財產有損壞';
       if (result === RETURN_RESULT.MISSING_PARTS) message = '已歸還，請注意配件缺少';
-      afterMutation(outcome.item.propertyId, message);
+      await afterMutation(outcome.item.propertyId, message);
     } catch (error) {
       toast(error.message || '歸還失敗', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
     }
   });
 
-  $('usageForm').addEventListener('submit', (event) => {
+  $('usageForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     try {
-      const { item } = addUsage({
+      const { item } = await addUsage({
         propertyId: $('usagePropertyId').value,
         userName: $('usageUser').value,
         department: $('usageDept').value,
@@ -1191,17 +1381,17 @@ function bindEvents() {
         note: $('usageNote').value
       });
       closeDialog('usageDialog', { silent: true });
-      afterMutation(item.propertyId, '已完成現場使用登記，使用次數已更新');
+      await afterMutation(item.propertyId, '已完成現場使用登記，使用次數已更新');
     } catch (error) {
       toast(error.message || '現場使用登記失敗', 'error');
     }
   });
 
-  $('auditForm').addEventListener('submit', (event) => {
+  $('auditForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     try {
       const result = document.querySelector('input[name="auditResult"]:checked')?.value;
-      const outcome = addAudit({
+      const outcome = await addAudit({
         propertyId: $('auditPropertyId').value,
         registeredLocation: $('auditRegistered').value,
         actualLocation: $('auditActual').value,
@@ -1211,7 +1401,7 @@ function bindEvents() {
         note: $('auditNote').value
       });
       closeDialog('auditDialog', { silent: true });
-      afterMutation(outcome.item.propertyId, '盤點結果已儲存');
+      await afterMutation(outcome.item.propertyId, '盤點結果已儲存');
       if (outcome.needsLocationConfirm) {
         askLocationConfirm(outcome.item.propertyId, outcome.entry.registeredLocation, outcome.entry.actualLocation);
       }
@@ -1220,10 +1410,10 @@ function bindEvents() {
     }
   });
 
-  $('locationForm').addEventListener('submit', (event) => {
+  $('locationForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     try {
-      const { item } = confirmLocationUpdate({
+      const { item } = await confirmLocationUpdate({
         propertyId: $('locationPropertyId').value,
         fromLocation: $('locationCurrent').value,
         toLocation: $('locationNext').value,
@@ -1231,16 +1421,16 @@ function bindEvents() {
         reason: $('locationReason').value
       });
       closeDialog('locationDialog', { silent: true });
-      afterMutation(item.propertyId, '位置已更新，並已建立異動紀錄');
+      await afterMutation(item.propertyId, '位置已更新，並已建立異動紀錄');
     } catch (error) {
       toast(error.message || '位置更新失敗', 'error');
     }
   });
 
-  $('confirmForm').addEventListener('submit', (event) => {
+  $('confirmForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     try {
-      confirmLocationUpdate({
+      await confirmLocationUpdate({
         propertyId: $('confirmPropertyId').value,
         fromLocation: $('confirmFrom').value,
         toLocation: $('confirmTo').value,
@@ -1248,7 +1438,7 @@ function bindEvents() {
         reason: '盤點後確認更新位置'
       });
       closeDialog('confirmDialog', { silent: true });
-      afterMutation($('confirmPropertyId').value, '已確認更新位置');
+      await afterMutation($('confirmPropertyId').value, '已確認更新位置');
     } catch (error) {
       toast(error.message || '位置更新失敗', 'error');
     }
@@ -1270,33 +1460,25 @@ function bindEvents() {
       return;
     }
     if (file.size > IMAGE_MAX_BYTES) {
-      $('imageError').textContent = '檔案大小不可超過 1.5 MB';
+      $('imageError').textContent = '檔案大小不可超過 5 MB';
       toast('檔案過大，請重新選擇', 'error');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      state.pendingImage = String(reader.result || '');
-      $('imagePreview').src = state.pendingImage;
-      $('imageSaveBtn').disabled = false;
-    };
-    reader.onerror = () => {
-      $('imageError').textContent = '讀取圖片失敗，請再試一次';
-      toast('讀取圖片失敗', 'error');
-    };
-    reader.readAsDataURL(file);
+    state.pendingImage = file;
+    $('imagePreview').src = URL.createObjectURL(file);
+    $('imageSaveBtn').disabled = false;
   });
 
-  $('imageForm').addEventListener('submit', (event) => {
+  $('imageForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!state.pendingImage) {
       $('imageError').textContent = '請先選擇圖片';
       return;
     }
     try {
-      const item = saveImage($('imagePropertyId').value, state.pendingImage);
+      const item = await saveImage($('imagePropertyId').value, state.pendingImage);
       closeDialog('imageDialog', { silent: true });
-      afterMutation(item.propertyId, '圖片已儲存');
+      await afterMutation(item.propertyId, '圖片已儲存');
     } catch (error) {
       toast(error.message || '圖片儲存失敗', 'error');
     }
@@ -1315,79 +1497,99 @@ function bindEvents() {
     }
   });
 
-  const showTestResult = (result) => {
-    const box = $('loanTestResult');
-    box.hidden = false;
-    box.innerHTML = `
-      <p><strong>${result.ok ? '測試通過' : '測試未通過'}</strong>${result.propertyId ? ` · 測試財產 ${esc(result.propertyId)}` : ''}${result.loanId ? ` · ${esc(result.loanId)}` : ''}</p>
-      ${result.steps.map((step) => `<div class="feed-item"><strong>${esc(step.name)}</strong><div class="muted">${esc(step.detail || '')}</div></div>`).join('')}
-    `;
-    toast(result.ok ? '流程測試通過，測試資料已還原' : (result.error || '流程測試未通過'), result.ok ? 'ok' : 'error');
-  };
-
-  $('runLoanTestBtn').addEventListener('click', () => {
-    const box = $('loanTestResult');
-    box.hidden = false;
-    box.innerHTML = '<p class="muted">測試進行中…</p>';
+  $('loginForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const btn = $('loginSubmitBtn');
+    btn.disabled = true;
     try {
-      const result = runLoanLifecycleTest();
-      render();
-      showTestResult(result);
+      const email = $('loginEmail').value;
+      const otp = $('loginOtp').value.trim();
+      if (otp) {
+        await verifyEmailOtp(email, otp);
+        toast('登入成功');
+        await bootApp();
+      } else {
+        await sendLoginOtp(email);
+        toast('已寄送登入連結，請至信箱查收');
+      }
     } catch (error) {
-      box.innerHTML = `<p class="muted">${esc(error.message)}</p>`;
-      toast(error.message || '測試失敗', 'error');
+      toast(error.message || '登入失敗', 'error');
+    } finally {
+      btn.disabled = false;
     }
   });
-  $('runSelfServiceTestBtn').addEventListener('click', () => {
-    const box = $('loanTestResult');
-    box.hidden = false;
-    box.innerHTML = '<p class="muted">測試進行中…</p>';
+  $('logoutBtn').addEventListener('click', async () => {
+    await signOut();
+    showAuthGate(true);
+    toast('已登出');
+  });
+  $('profileForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
     try {
-      const result = runSelfServiceFlowTest();
-      render();
-      showTestResult(result);
+      await updateMyProfile({
+        displayName: $('profileName').value,
+        schoolNumber: $('profileSchool').value,
+        department: $('profileDept').value
+      });
+      applyRoleNav();
+      toast('個人資料已儲存');
     } catch (error) {
-      box.innerHTML = `<p class="muted">${esc(error.message)}</p>`;
-      toast(error.message || '測試失敗', 'error');
+      toast(error.message || '儲存失敗', 'error');
     }
   });
-
-  $('exportTestDataBtn').addEventListener('click', () => {
-    const blob = new Blob([JSON.stringify(exportOperationalJson(), null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `hkproperty-test-data-${formatDate(new Date().toISOString())}.json`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-    toast('已匯出測試資料 JSON');
-  });
-  $('importTestDataInput').addEventListener('change', async (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
+  $('systemSettingsForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
     try {
-      const payload = JSON.parse(await file.text());
-      importOperationalJson(payload);
-      render();
-      toast('已匯入測試資料');
+      await saveSettings({
+        requireLoanApproval: $('settingRequireApproval').checked,
+        allowSelfCheckout: $('settingAllowSelf').checked,
+        defaultLoanDays: Number($('settingLoanDays').value || 1)
+      });
+      toast('系統設定已儲存');
     } catch (error) {
-      toast(error.message || '匯入失敗，請確認 JSON 格式', 'error');
+      toast(error.message || '儲存失敗', 'error');
     }
   });
-  $('clearTestDataBtn').addEventListener('click', async () => {
+  $('clearLegacyBtn').addEventListener('click', async () => {
     const ok = await confirmAction({
-      title: '清除測試資料',
-      text: '將清除借用、使用、圖片、盤點及位置異動紀錄，並讓全部財產恢復可借用。390 筆原始財產清冊不會被刪除。此操作無法復原。',
-      confirmLabel: '確認清除',
-      cancelLabel: '取消'
+      title: '清除瀏覽器舊測試資料',
+      text: '只會清除此瀏覽器的舊版 localStorage，不會影響雲端資料，也不會上傳舊的姓名或學號。',
+      confirmLabel: '確認清除'
     });
     if (!ok) return;
-    clearOperationalData();
-    render();
-    toast(`測試資料已清除，財產清冊仍為 ${listItems().length} 筆`);
+    clearLegacyLocalData();
+    renderSettings();
+    toast('已清除本機舊測試資料');
+  });
+  $('rejectForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await rejectLoan($('rejectLoanId').value, $('rejectReason').value);
+      closeDialog('rejectDialog', { silent: true });
+      await afterMutation(null, '已拒絕借用申請');
+    } catch (error) {
+      toast(error.message || '拒絕失敗', 'error');
+    }
+  });
+  document.addEventListener('change', async (event) => {
+    const roleSelect = event.target.closest('[data-role-user]');
+    if (!roleSelect) return;
+    const ok = await confirmAction({
+      title: '修改使用者角色',
+      text: '角色異動會留下操作紀錄。確定要變更嗎？',
+      confirmLabel: '確認修改'
+    });
+    if (!ok) {
+      renderUsers();
+      return;
+    }
+    try {
+      await adminUpdateProfile({ id: roleSelect.dataset.roleUser, role: roleSelect.value });
+      toast('角色已更新');
+    } catch (error) {
+      toast(error.message || '更新失敗', 'error');
+      renderUsers();
+    }
   });
 
   document.addEventListener('keydown', (event) => {
@@ -1401,27 +1603,52 @@ function bindEvents() {
 
 function showLoadError(message) {
   setLoading(false);
+  $('main').hidden = false;
   $('loadError').hidden = false;
   $('loadErrorText').textContent = message;
   document.querySelectorAll('.view').forEach((el) => { el.hidden = true; });
 }
 
-async function init() {
-  bindEvents();
+async function bootApp() {
+  if (!getProfile()) {
+    showAuthGate(true);
+    setLoading(false);
+    return;
+  }
+  applyRoleNav();
+  showAuthGate(false);
   $('loadError').hidden = true;
   setLoading(true, '正在載入財產清冊…');
   try {
-    await loadCatalog();
-    refreshOverdueStatus();
-    refreshFilterOptions();
+    await refreshData();
     setLoading(false);
-    $('loadError').hidden = true;
-    setView('dashboard');
+    applyRoleNav();
+    setView(isStaff() ? 'dashboard' : 'selfService');
     toast(`已載入 ${listItems().length} 筆財產`);
   } catch (error) {
-    showLoadError(error.message || '無法載入財產清冊，請重新載入。');
+    showLoadError(error.message || '無法載入資料，請重試。');
     toast(error.message || '載入失敗', 'error');
   }
+}
+
+async function init() {
+  bindEvents();
+  $('loadError').hidden = true;
+  const configError = getSupabaseConfigError();
+  if (configError) {
+    showAuthGate(true);
+    showLoadError(configError);
+    toast('請先設定 Supabase 環境變數', 'error');
+    return;
+  }
+  setLoading(true, '檢查登入狀態…');
+  await initAuth(async (profile) => {
+    if (profile) await bootApp();
+    else {
+      setLoading(false);
+      showAuthGate(true);
+    }
+  });
 }
 
 init();

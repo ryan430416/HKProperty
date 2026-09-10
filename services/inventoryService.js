@@ -1,8 +1,11 @@
-import { STORAGE_KEYS, migrateLegacyStorage, readStore, uid, writeStore } from './storageService.js';
 import { AUDIT_STATUS, PLACEHOLDER_IMAGE } from '../js/format.js';
+import { isStaff } from './authService.js';
+import { publicImageUrl, uploadAssetImage } from './storageService.js';
+import { requireClient, throwIfError } from './supabaseClient.js';
 
 export const AVAILABILITY = {
   AVAILABLE: 'available',
+  PENDING: 'pending',
   CHECKED_OUT: 'checked_out',
   OVERDUE: 'overdue',
   MAINTENANCE: 'maintenance',
@@ -11,70 +14,83 @@ export const AVAILABILITY = {
 
 export const AVAILABILITY_LABEL = {
   available: '可借用',
+  pending: '待核准',
   checked_out: '已借出',
   overdue: '已逾期',
   maintenance: '維修中',
   lost: '異常'
 };
 
-const CATALOG_URL = 'data/inventory.json';
-
-let catalog = [];
+let cache = [];
 let loaded = false;
+let overdueAssetIds = new Set();
 
-migrateLegacyStorage();
-
-function getOverrides() {
-  return readStore(STORAGE_KEYS.overrides, {});
+function primaryImage(row) {
+  const images = row.asset_images || row.images || [];
+  const primary = images.find((img) => img.is_primary) || images[0];
+  return primary?.storage_path ? publicImageUrl(primary.storage_path) : PLACEHOLDER_IMAGE;
 }
 
-function saveOverrides(map) {
-  writeStore(STORAGE_KEYS.overrides, map);
-}
-
-function getImages() {
-  return readStore(STORAGE_KEYS.images, {});
-}
-
-function saveImages(map) {
-  writeStore(STORAGE_KEYS.images, map);
-}
-
-function mergeItem(base) {
-  const override = getOverrides()[base.propertyId] || {};
-  const image = getImages()[base.propertyId];
-  const availabilityStatus = override.availabilityStatus || AVAILABILITY.AVAILABLE;
+export function mapAsset(row) {
+  let availabilityStatus = row.availability_status || AVAILABILITY.AVAILABLE;
+  if (availabilityStatus === AVAILABILITY.CHECKED_OUT && overdueAssetIds.has(row.id)) {
+    availabilityStatus = AVAILABILITY.OVERDUE;
+  }
   return {
-    ...base,
-    originalLocation: base.location,
-    location: override.location ?? base.location,
-    useCount: Number.isFinite(override.useCount) ? override.useCount : 0,
-    lastAuditAt: override.lastAuditAt ?? null,
-    auditStatus: override.auditStatus ?? AUDIT_STATUS.PENDING,
+    id: row.id,
+    propertyId: String(row.property_id),
+    name: row.name,
+    location: row.location,
+    originalLocation: row.location,
+    department: row.department,
+    custodian: row.custodian,
+    specification: row.specification,
+    unit: row.unit,
+    price: row.price,
+    purchaseDate: row.purchase_date,
+    serviceLife: row.service_life,
+    supplier: row.supplier,
+    status: row.asset_status === 'normal' ? '正常' : (row.asset_status || '正常'),
+    note: row.note,
+    brand: row.brand,
+    model: row.model,
+    isBorrowable: row.is_borrowable !== false,
+    isActive: row.is_active !== false,
+    useCount: Number(row.usage_count || 0),
+    lastAuditAt: row.last_audit_at || null,
+    auditStatus: row.audit_status || AUDIT_STATUS.PENDING,
     availabilityStatus,
     availabilityLabel: AVAILABILITY_LABEL[availabilityStatus] || AVAILABILITY_LABEL.available,
-    currentLoanId: override.currentLoanId ?? null,
-    returnAlert: override.returnAlert ?? null,
-    image: image || PLACEHOLDER_IMAGE,
-    hasCustomImage: Boolean(image)
+    currentLoanId: row.current_loan_id || null,
+    returnAlert: row.return_alert || null,
+    image: primaryImage(row),
+    hasCustomImage: Boolean((row.asset_images || []).length)
   };
 }
 
+export function setOverdueAssetIds(ids) {
+  overdueAssetIds = new Set(ids || []);
+  cache = cache.map((item) => {
+    const rawStatus = item.availabilityStatus === AVAILABILITY.OVERDUE ? AVAILABILITY.CHECKED_OUT : item.availabilityStatus;
+    const availabilityStatus = rawStatus === AVAILABILITY.CHECKED_OUT && overdueAssetIds.has(item.id)
+      ? AVAILABILITY.OVERDUE
+      : rawStatus;
+    return {
+      ...item,
+      availabilityStatus,
+      availabilityLabel: AVAILABILITY_LABEL[availabilityStatus] || item.availabilityLabel
+    };
+  });
+}
+
 export async function loadCatalog() {
-  const response = await fetch(CATALOG_URL, { cache: 'no-store' });
-  if (!response.ok) {
-    throw new Error(`無法載入財產清冊資料（HTTP ${response.status}）。請確認以本機或網站伺服器開啟，且 data/inventory.json 存在。`);
-  }
-  let payload;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new Error('財產清冊資料格式不正確，無法解析 inventory.json。');
-  }
-  catalog = Array.isArray(payload.items) ? payload.items : [];
-  if (!catalog.length) {
-    throw new Error('財產清冊沒有資料，請確認 inventory.json 內容。');
-  }
+  const client = requireClient();
+  const staff = isStaff();
+  const table = staff ? 'assets' : 'assets_basic';
+  let query = client.from(table).select(staff ? '*, asset_images(*)' : '*').order('property_id');
+  const { data, error } = await query;
+  throwIfError(error, '無法載入財產清冊');
+  cache = (data || []).map(mapAsset);
   loaded = true;
   return listItems();
 }
@@ -84,43 +100,15 @@ export function isCatalogLoaded() {
 }
 
 export function listItems() {
-  if (!loaded) return [];
-  return catalog.map(mergeItem);
+  return cache.slice();
 }
 
 export function getItem(propertyId) {
   const id = String(propertyId ?? '').trim();
-  const base = catalog.find((item) => item.propertyId === id);
-  return base ? mergeItem(base) : null;
+  return cache.find((item) => item.propertyId === id || item.id === id) || null;
 }
 
 export function findByPropertyId(propertyId) {
-  return getItem(propertyId);
-}
-
-export function patchItem(propertyId, patch) {
-  const map = getOverrides();
-  const next = { ...(map[propertyId] || {}), ...patch };
-  if ('image' in next) delete next.image;
-  map[propertyId] = next;
-  saveOverrides(map);
-  return getItem(propertyId);
-}
-
-export function incrementUseCount(propertyId) {
-  const item = getItem(propertyId);
-  if (!item) throw new Error('找不到財產');
-  return patchItem(propertyId, { useCount: item.useCount + 1 });
-}
-
-export function updateLocation(propertyId, location) {
-  return patchItem(propertyId, { location });
-}
-
-export function saveImage(propertyId, dataUrl) {
-  const images = getImages();
-  images[propertyId] = dataUrl;
-  saveImages(images);
   return getItem(propertyId);
 }
 
@@ -158,6 +146,7 @@ export function getStats() {
       item.auditStatus === AUDIT_STATUS.MISMATCH || item.auditStatus === AUDIT_STATUS.MISSING
     )).length,
     available: items.filter((item) => item.availabilityStatus === AVAILABILITY.AVAILABLE).length,
+    approvalPending: items.filter((item) => item.availabilityStatus === AVAILABILITY.PENDING).length,
     checkedOut: items.filter((item) => item.availabilityStatus === AVAILABILITY.CHECKED_OUT).length,
     overdue: items.filter((item) => item.availabilityStatus === AVAILABILITY.OVERDUE).length,
     maintenance: items.filter((item) => item.availabilityStatus === AVAILABILITY.MAINTENANCE).length,
@@ -165,4 +154,25 @@ export function getStats() {
   };
 }
 
-export { uid };
+export async function saveImage(propertyId, file) {
+  const item = getItem(propertyId);
+  if (!item) throw new Error('找不到財產');
+  await uploadAssetImage(item.id, file);
+  await loadCatalog();
+  return getItem(propertyId);
+}
+
+export async function setAssetActive(propertyId, isActive) {
+  const item = getItem(propertyId);
+  if (!item) throw new Error('找不到財產');
+  const client = requireClient();
+  const { error } = await client.rpc('admin_set_asset_active', {
+    p_asset_id: item.id,
+    p_is_active: isActive
+  });
+  throwIfError(error, '無法更新財產狀態');
+  await loadCatalog();
+  return getItem(propertyId);
+}
+
+export { PLACEHOLDER_IMAGE };

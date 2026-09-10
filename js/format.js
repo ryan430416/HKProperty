@@ -1,6 +1,6 @@
 export const PLACEHOLDER_IMAGE = 'assets/placeholder.svg';
 export const PAGE_SIZE = 20;
-export const IMAGE_MAX_BYTES = 1.5 * 1024 * 1024;
+export const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 export const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 export const AUDIT_RESULTS = {
@@ -46,26 +46,42 @@ export function pad(number) {
   return String(number).padStart(2, '0');
 }
 
+const TAIPEI = 'Asia/Taipei';
+
+function partsInTaipei(date) {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TAIPEI,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  });
+  const bag = Object.fromEntries(fmt.formatToParts(date).map((part) => [part.type, part.value]));
+  return bag;
+}
+
 export function formatDate(iso) {
   if (!iso) return '未提供';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
   const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
-    return '未提供';
-  }
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  if (Number.isNaN(date.getTime())) return '未提供';
+  const bag = partsInTaipei(date);
+  return `${bag.year}-${bag.month}-${bag.day}`;
 }
 
 export function formatDateTime(iso, empty = '未提供') {
   if (!iso) return empty;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '未提供';
-  return `${formatDate(iso)} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const bag = partsInTaipei(date);
+  return `${bag.year}-${bag.month}-${bag.day} ${bag.hour}:${bag.minute}`;
 }
 
 export function availabilityClass(status) {
   if (status === 'available') return 'ok';
-  if (status === 'checked_out') return 'loan';
+  if (status === 'checked_out' || status === 'pending') return 'loan';
   if (status === 'overdue' || status === 'lost') return 'alert';
   if (status === 'maintenance') return 'pending';
   return '';

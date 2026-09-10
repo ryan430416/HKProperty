@@ -1,0 +1,18 @@
+{
+  "name": "hkproperty",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "import:assets": "node scripts/import-assets.mjs",
+    "test:schema": "node tools/sql_schema.test.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4"
+  },
+  "devDependencies": {
+    "vite": "^6.3.5"
+  }
+}

@@ -1,2 +1,3 @@
-export { readStore as readJson, writeStore as writeJson, uid } from './storageService.js';
-export { STORAGE_KEYS, migrateLegacyStorage } from './storageService.js';
+export function uid(prefix = 'id') {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}

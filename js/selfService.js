@@ -1,7 +1,6 @@
 import { AVAILABILITY, getItem } from '../services/inventoryService.js';
 import {
   CHECKOUT_METHOD,
-  assertAvailableForCheckout,
   checkin,
   checkout,
   displayLoanStatus,
@@ -13,7 +12,7 @@ import {
 } from '../services/loanService.js';
 import { displayValue, esc, formatDateTime, toInputDateTime } from './format.js';
 import { parseScanPayload } from './scanner.js';
-import { toast } from './ui.js';
+import { getProfile } from '../services/authService.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -114,12 +113,15 @@ export function openSelfMode(mode) {
 }
 
 function canStartBorrow(item) {
-  try {
-    assertAvailableForCheckout(item.propertyId);
-    return { ok: true, message: '' };
-  } catch (error) {
-    return { ok: false, message: error.message };
+  if (!item) return { ok: false, message: '查無此財產編號' };
+  if (item.availabilityStatus === AVAILABILITY.AVAILABLE) return { ok: true, message: '' };
+  if (item.availabilityStatus === AVAILABILITY.MAINTENANCE) return { ok: false, message: '此財產維修中，無法辦理借出' };
+  if (item.availabilityStatus === AVAILABILITY.LOST) return { ok: false, message: '此財產狀態為異常，無法辦理借出' };
+  if (item.availabilityStatus === AVAILABILITY.CHECKED_OUT || item.availabilityStatus === AVAILABILITY.OVERDUE) {
+    return { ok: false, message: '此財產目前已借出，不可再次借出' };
   }
+  if (item.availabilityStatus === AVAILABILITY.PENDING) return { ok: false, message: '此財產已有待處理的借用申請' };
+  return { ok: false, message: '僅可借用狀態的財產才能辦理借出' };
 }
 
 function renderBorrowPreview(item) {
@@ -200,6 +202,12 @@ function validateBorrowForm(data) {
 
 function fillBorrowDefaults() {
   $('ssBorrowFormHint').textContent = `${state.item.name} · ${state.item.propertyId}`;
+  const profile = getProfile();
+  if (profile) {
+    if (!$('ssBorrowerName').value) $('ssBorrowerName').value = profile.display_name || '';
+    if (!$('ssBorrowerId').value) $('ssBorrowerId').value = profile.school_number || '';
+    if (!$('ssBorrowerDept').value) $('ssBorrowerDept').value = profile.department || '';
+  }
   if (!$('ssBorrowAt').value) $('ssBorrowAt').value = toInputDateTime();
   if (!$('ssBorrowDue').value) {
     const due = new Date();
@@ -227,7 +235,7 @@ async function submitBorrow() {
   btn.disabled = true;
   try {
     const data = readBorrowForm();
-    const result = checkout(data);
+    const result = await checkout(data);
     state.lastLoanId = result.entry.id;
     state.lastBorrowerId = result.entry.borrowerId;
     $('ssBorrowSuccessBody').innerHTML = `
@@ -240,8 +248,8 @@ async function submitBorrow() {
       ])}
     `;
     setBorrowStep(4);
-    onChanged();
-    toast('借用成功，請保存借用編號');
+    await onChanged();
+    toast(result.entry.rawStatus === 'pending' ? '已送出借用申請，請等待管理者核准' : '借用成功，請保存借用編號');
   } catch (error) {
     toast(error.message || '借出失敗', 'error');
   } finally {
@@ -305,7 +313,7 @@ async function submitReturn() {
   btn.disabled = true;
   try {
     const data = readReturnForm();
-    const result = checkin(data);
+    const result = await checkin(data);
     $('ssReturnSuccessBody').innerHTML = kv([
       ['物品名稱', result.item.name],
       ['財產編號', result.item.propertyId],
@@ -317,7 +325,7 @@ async function submitReturn() {
     ]);
     state.loan = null;
     setReturnStep(4);
-    onChanged();
+    await onChanged();
     toast('歸還成功');
   } catch (error) {
     toast(error.message || '歸還失敗', 'error');
@@ -346,12 +354,12 @@ function renderLookupRows(rows) {
   }).join('');
 }
 
-function startReturnFromLoan(code, borrowerId) {
+async function startReturnFromLoan(code, borrowerId) {
   $('ssReturnCode').value = code;
   $('ssReturnBorrowerId').value = borrowerId;
   openSelfMode('return');
   try {
-    const { loan, item } = verifySelfServiceLoan(code, borrowerId);
+    const { loan, item } = await verifySelfServiceLoan(code, borrowerId);
     state.loan = loan;
     state.item = item;
     showReturnPreview(loan, item);
@@ -417,11 +425,11 @@ export function bindSelfService(handlers = {}) {
   });
   $('ssBorrowViewStatusBtn').addEventListener('click', () => openSelfMode('lookup'));
 
-  $('ssReturnLookupForm').addEventListener('submit', (event) => {
+  $('ssReturnLookupForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     clearErrors(['ssReturnCodeError', 'ssReturnBorrowerIdError']);
     try {
-      const { loan, item } = verifySelfServiceLoan($('ssReturnCode').value, $('ssReturnBorrowerId').value);
+      const { loan, item } = await verifySelfServiceLoan($('ssReturnCode').value, $('ssReturnBorrowerId').value);
       state.loan = loan;
       state.item = item;
       showReturnPreview(loan, item);
@@ -467,11 +475,11 @@ export function bindSelfService(handlers = {}) {
   $('ssReturnEditBtn').addEventListener('click', () => setReturnStep(2));
   $('ssReturnSubmitBtn').addEventListener('click', submitReturn);
 
-  $('ssLookupForm').addEventListener('submit', (event) => {
+  $('ssLookupForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     clearErrors(['ssLookupCodeError', 'ssLookupBorrowerIdError']);
     try {
-      const rows = lookupSelfServiceLoans($('ssLookupCode').value, $('ssLookupBorrowerId').value);
+      const rows = await lookupSelfServiceLoans($('ssLookupCode').value, $('ssLookupBorrowerId').value);
       state.lastLoanId = $('ssLookupCode').value.trim();
       state.lastBorrowerId = $('ssLookupBorrowerId').value.trim();
       renderLookupRows(rows);

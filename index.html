@@ -26,15 +26,17 @@
         <button type="button" class="nav-item active" data-view="dashboard">系統總覽</button>
         <button type="button" class="nav-item" data-view="selfService">自助借還</button>
         <button type="button" class="nav-item" data-view="inventory">財產清冊</button>
-        <button type="button" class="nav-item" data-view="loans">借出管理</button>
+        <button type="button" class="nav-item" data-min-role="staff" data-view="loans">借出管理</button>
         <button type="button" class="nav-item" data-view="loanHistory">借用紀錄</button>
-        <button type="button" class="nav-item" data-view="audit">盤點作業</button>
-        <button type="button" class="nav-item" data-view="usage">使用紀錄</button>
-        <button type="button" class="nav-item" data-view="locations">位置管理</button>
-        <button type="button" class="nav-item" data-view="settings">系統設定</button>
+        <button type="button" class="nav-item" data-min-role="staff" data-view="audit">盤點作業</button>
+        <button type="button" class="nav-item" data-min-role="staff" data-view="usage">使用紀錄</button>
+        <button type="button" class="nav-item" data-min-role="staff" data-view="locations">位置管理</button>
+        <button type="button" class="nav-item" data-min-role="staff" data-view="logs">操作紀錄</button>
+        <button type="button" class="nav-item" data-min-role="admin" data-view="users">使用者管理</button>
+        <button type="button" class="nav-item" data-min-role="staff" data-view="settings">系統設定</button>
       </nav>
       <button type="button" class="scan-btn" id="scanBtn">掃描財產 QR Code</button>
-      <p class="side-foot">本機雛形 · 資料保存在此瀏覽器</p>
+      <p class="side-foot">資料儲存在雲端資料庫，可在不同裝置同步</p>
     </aside>
 
     <div class="shell">
@@ -62,13 +64,39 @@
             <div id="notifyList"></div>
           </div>
         </div>
-        <div class="admin">
-          <span class="avatar" aria-hidden="true">管</span>
-          <span>管理者</span>
+        <div class="admin" id="userMenu">
+          <span class="avatar" aria-hidden="true" id="userAvatar">用</span>
+          <div class="user-meta">
+            <strong id="userName">未登入</strong>
+            <small id="userRole">請登入</small>
+          </div>
+          <button type="button" class="ghost-btn" id="logoutBtn" hidden>登出</button>
         </div>
       </header>
 
-      <main id="main">
+        <div id="authGate" class="auth-gate" hidden>
+          <article class="panel login-card">
+            <p class="eyebrow">弘光科技大學</p>
+            <h2>登入財產盤點系統</h2>
+            <p class="muted">請使用學校電子郵件收取登入連結或一次性密碼。新帳號預設為借用人。</p>
+            <form id="loginForm">
+              <div class="field">
+                <label for="loginEmail">電子郵件 <span class="req">必填</span></label>
+                <input id="loginEmail" type="email" autocomplete="email" required />
+                <p class="field-error" id="loginEmailError"></p>
+              </div>
+              <div class="field">
+                <label for="loginOtp">一次性密碼（若信件提供）</label>
+                <input id="loginOtp" inputmode="numeric" autocomplete="one-time-code" placeholder="選填，有驗證碼再填" />
+              </div>
+              <div class="ss-sticky">
+                <button type="submit" class="primary" id="loginSubmitBtn">寄送登入連結</button>
+              </div>
+            </form>
+            <p class="muted ss-foot">未登入時不會顯示借用者姓名、學號或聯絡方式。</p>
+          </article>
+        </div>
+        <main id="main">
         <div id="loading" class="loading" hidden>
           <div class="spinner" aria-hidden="true"></div>
           <p>資料載入中…</p>
@@ -387,6 +415,7 @@
               <select id="filterAvailability">
                 <option value="">全部借用狀態</option>
                 <option value="available">可借用</option>
+                <option value="pending">待核准</option>
                 <option value="checked_out">已借出</option>
                 <option value="overdue">已逾期</option>
                 <option value="maintenance">維修中</option>
@@ -446,6 +475,7 @@
               <label for="loanStatusFilter">借用狀態</label>
               <select id="loanStatusFilter">
                 <option value="open">目前借出中</option>
+                <option value="pending">待核准</option>
                 <option value="checked_out">已借出</option>
                 <option value="overdue">已逾期</option>
                 <option value="dueSoon">即將到期</option>
@@ -482,6 +512,7 @@
               <label for="histStatus">狀態</label>
               <select id="histStatus">
                 <option value="">全部狀態</option>
+                <option value="pending">待核准</option>
                 <option value="checked_out">借用中</option>
                 <option value="overdue">已逾期</option>
                 <option value="returned">已歸還</option>
@@ -558,30 +589,63 @@
           </div>
         </section>
 
+        <section class="view" id="view-logs" hidden aria-label="操作紀錄">
+          <div class="panel">
+            <h2>操作紀錄</h2>
+            <p class="muted">僅經辦人員與管理者可查看。紀錄不可由前端修改或刪除。</p>
+            <div id="operationLogList"></div>
+          </div>
+        </section>
+
+        <section class="view" id="view-users" hidden aria-label="使用者管理">
+          <div class="panel">
+            <h2>使用者與角色</h2>
+            <p class="muted">新註冊帳號預設為借用人。角色異動會留下操作紀錄。</p>
+            <div id="userManageList"></div>
+          </div>
+        </section>
+
         <section class="view" id="view-settings" hidden aria-label="系統設定">
           <div class="panel">
-            <h2>系統設定</h2>
-            <p class="muted">帳號權限、盤點年度與資料同步功能開發中。</p>
+            <h2>個人資料</h2>
+            <form id="profileForm" class="filters">
+              <div class="field">
+                <label for="profileName">顯示名稱</label>
+                <input id="profileName" maxlength="40" />
+              </div>
+              <div class="field">
+                <label for="profileSchool">學號或教職員編號</label>
+                <input id="profileSchool" maxlength="40" />
+              </div>
+              <div class="field grow">
+                <label for="profileDept">單位、系所或社團</label>
+                <input id="profileDept" maxlength="60" />
+              </div>
+              <div class="field field-action">
+                <button type="submit" class="primary">儲存個人資料</button>
+              </div>
+            </form>
+          </div>
+          <div class="panel" style="margin-top:16px" id="systemSettingsPanel" hidden>
+            <h2>借用規則</h2>
+            <p class="muted">測試環境可關閉審核並開放自助借還；正式上線建議開啟審核並關閉自助立即借出。</p>
+            <form id="systemSettingsForm">
+              <label class="choice"><input id="settingRequireApproval" type="checkbox" /> 借用需管理者核准</label>
+              <label class="choice"><input id="settingAllowSelf" type="checkbox" /> 允許自助借出與歸還</label>
+              <div class="field">
+                <label for="settingLoanDays">預設借用天數</label>
+                <input id="settingLoanDays" type="number" min="1" max="60" />
+              </div>
+              <div class="dialog-actions">
+                <button type="submit" class="primary">儲存系統設定</button>
+              </div>
+            </form>
           </div>
           <div class="panel" style="margin-top:16px">
-            <h2>借出流程自我檢測</h2>
-            <p class="muted">系統會暫時借用一件財產並立即還原 localStorage，不會留下測試紀錄，也不會改寫 390 筆原始清冊。</p>
-            <button type="button" class="primary" id="runLoanTestBtn">執行借出流程測試</button>
-            <button type="button" class="secondary" id="runSelfServiceTestBtn">執行自助借還流程測試</button>
-            <div id="loanTestResult" class="test-result" hidden></div>
-          </div>
-          <div class="panel" style="margin-top:16px">
-            <h2>測試資料</h2>
-            <p class="muted">僅供目前雛形使用。清除時只會刪除借用、使用、圖片、盤點及位置異動紀錄，不會刪除 390 筆原始財產清冊。</p>
-            <p id="storageUsageText">計算 localStorage 使用量中…</p>
-            <div class="settings-actions">
-              <button type="button" class="secondary" id="exportTestDataBtn">匯出測試資料 JSON</button>
-              <label class="secondary file-btn">
-                匯入測試資料 JSON
-                <input id="importTestDataInput" type="file" accept="application/json,.json" hidden />
-              </label>
-              <button type="button" class="danger" id="clearTestDataBtn">清除測試產生的借用紀錄</button>
-            </div>
+            <h2>舊版本機測試資料</h2>
+            <p class="muted">若先前曾用瀏覽器 localStorage 測試，可在此清除。不會上傳舊的姓名、學號或聯絡方式，也不會影響雲端正式資料。</p>
+            <p id="legacyDataText">檢查中…</p>
+            <button type="button" class="danger" id="clearLegacyBtn">清除瀏覽器舊測試資料</button>
           </div>
         </section>
       </main>
@@ -728,7 +792,7 @@
         <button type="button" class="icon-btn" data-close="imageDialog" aria-label="關閉">×</button>
       </div>
       <input type="hidden" id="imagePropertyId" />
-      <p class="muted">僅支援 JPG、PNG、WebP，檔案請小於 1.5 MB。手機可直接拍照上傳。</p>
+      <p class="muted">僅支援 JPG、PNG、WebP，檔案請小於 5 MB。手機可直接拍照上傳。</p>
       <div class="image-preview" id="imagePreviewBox">
         <img id="imagePreview" alt="圖片預覽" />
       </div>
@@ -958,6 +1022,27 @@
       <div class="dialog-actions">
         <button type="button" class="secondary" data-confirm-cancel>取消</button>
         <button type="submit" class="primary" id="appConfirmOk">確認</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="rejectDialog">
+    <form id="rejectForm">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">拒絕申請</p>
+          <h2>請填寫拒絕原因</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close="rejectDialog" aria-label="關閉">×</button>
+      </div>
+      <input type="hidden" id="rejectLoanId" />
+      <div class="field">
+        <label for="rejectReason">拒絕原因 <span class="req">必填</span></label>
+        <textarea id="rejectReason" required maxlength="200" rows="3"></textarea>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="secondary" data-close="rejectDialog">取消</button>
+        <button type="submit" class="danger">確認拒絕</button>
       </div>
     </form>
   </dialog>
