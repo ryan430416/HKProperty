@@ -1,15 +1,19 @@
+import { PB } from '../pocketbase/schema.mjs';
+import { isDemoMode } from './authService.js';
+import { demoAddAudit, demoAudits, demoLocations, demoUpdateLocation } from './demoStore.js';
 import { AUDIT_RESULTS, AUDIT_STATUS } from '../js/format.js';
 import { getItem, loadCatalog } from './inventoryService.js';
-import { requireClient, throwIfError } from './supabaseClient.js';
+import { getFullList, hkpPost, relationId } from './hkpApi.js';
 
 let auditCache = [];
 let locationCache = [];
 
 export function mapAudit(row, item) {
+  const assetId = relationId(row.asset) || row.asset_id;
   return {
     id: row.id,
     propertyId: item?.propertyId || row.property_id,
-    assetId: row.asset_id,
+    assetId,
     registeredLocation: row.registered_location,
     actualLocation: row.actual_location,
     result: row.result,
@@ -20,43 +24,44 @@ export function mapAudit(row, item) {
 }
 
 export function mapLocation(row, item) {
+  const assetId = relationId(row.asset) || row.asset_id;
   return {
     id: row.id,
     propertyId: item?.propertyId || row.property_id,
-    assetId: row.asset_id,
+    assetId,
     fromLocation: row.from_location,
     toLocation: row.to_location,
     operator: row.operator_name,
     reason: row.reason,
-    changedAt: row.changed_at
+    changedAt: row.created || row.changed_at
   };
 }
 
 export async function loadAudits() {
-  const client = requireClient();
-  const { data, error } = await client
-    .from('inventory_audits')
-    .select('*')
-    .order('audited_at', { ascending: false });
-  if (error) {
-    auditCache = [];
+  if (isDemoMode()) {
+    auditCache = demoAudits().map((row) => mapAudit(row, getItem(relationId(row.asset))));
     return auditCache;
   }
-  auditCache = (data || []).map((row) => mapAudit(row, getItem(row.asset_id)));
+  try {
+    const rows = await getFullList(PB.audits, { sort: '-audited_at' });
+    auditCache = (rows || []).map((row) => mapAudit(row, getItem(relationId(row.asset))));
+  } catch {
+    auditCache = [];
+  }
   return auditCache;
 }
 
 export async function loadLocationHistory() {
-  const client = requireClient();
-  const { data, error } = await client
-    .from('location_history')
-    .select('*')
-    .order('changed_at', { ascending: false });
-  if (error) {
-    locationCache = [];
+  if (isDemoMode()) {
+    locationCache = demoLocations().map((row) => mapLocation(row, getItem(relationId(row.asset))));
     return locationCache;
   }
-  locationCache = (data || []).map((row) => mapLocation(row, getItem(row.asset_id)));
+  try {
+    const rows = await getFullList(PB.locations, { sort: '-created' });
+    locationCache = (rows || []).map((row) => mapLocation(row, getItem(relationId(row.asset))));
+  } catch {
+    locationCache = [];
+  }
   return locationCache;
 }
 
@@ -75,17 +80,27 @@ export function listLocationChanges(propertyId) {
 export async function addAudit({ propertyId, registeredLocation, actualLocation, result, auditor, auditedAt, note }) {
   const item = getItem(propertyId);
   if (!item) throw new Error('找不到財產');
-  const client = requireClient();
-  const { error } = await client.rpc('record_inventory_audit', {
-    p_asset_id: item.id,
-    p_registered_location: registeredLocation,
-    p_actual_location: actualLocation,
-    p_result: result,
-    p_auditor: auditor,
-    p_audited_at: new Date(auditedAt || Date.now()).toISOString(),
-    p_note: note || null
+  if (isDemoMode()) {
+    demoAddAudit({
+      asset_id: item.id,
+      registered_location: registeredLocation,
+      actual_location: actualLocation,
+      result,
+      auditor,
+      audited_at: new Date(auditedAt || Date.now()).toISOString(),
+      note: note || null
+    });
+  } else {
+    await hkpPost('/api/hkp/audits', {
+    asset_id: item.id,
+    registered_location: registeredLocation,
+    actual_location: actualLocation,
+    result,
+    auditor,
+    audited_at: new Date(auditedAt || Date.now()).toISOString(),
+    note: note || null
   });
-  throwIfError(error, '盤點失敗');
+  }
   await Promise.all([loadCatalog(), loadAudits()]);
   const updated = getItem(propertyId);
   return {
@@ -98,14 +113,19 @@ export async function addAudit({ propertyId, registeredLocation, actualLocation,
 export async function confirmLocationUpdate({ propertyId, fromLocation, toLocation, operator, reason }) {
   const item = getItem(propertyId);
   if (!item) throw new Error('找不到財產');
-  const client = requireClient();
-  const { error } = await client.rpc('update_asset_location', {
-    p_asset_id: item.id,
-    p_from_location: fromLocation,
-    p_to_location: toLocation,
-    p_reason: reason || `由 ${operator || '管理者'} 更新位置`
+  if (isDemoMode()) {
+    demoUpdateLocation(item.id, {
+      from_location: fromLocation,
+      to_location: toLocation,
+      reason: reason || `由 ${operator || '管理者'} 更新位置`
+    });
+  } else {
+    await hkpPost(`/api/hkp/assets/${item.id}/location`, {
+    from_location: fromLocation,
+    to_location: toLocation,
+    reason: reason || `由 ${operator || '管理者'} 更新位置`
   });
-  throwIfError(error, '位置更新失敗');
+  }
   await Promise.all([loadCatalog(), loadLocationHistory()]);
   return { item: getItem(propertyId), entry: listLocationChanges(propertyId)[0] };
 }

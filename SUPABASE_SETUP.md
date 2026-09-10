@@ -1,4 +1,7 @@
-# 弘光財產系統 Supabase 設定說明
+# 已改用 PocketBase，請改看 [POCKETBASE_SETUP.md](./POCKETBASE_SETUP.md)。
+# 以下為舊版 Supabase 說明，僅供對照，新環境請勿再執行這些 migration。
+
+
 
 本系統已改為使用 Supabase 同步財產、借用、盤點與圖片。前端只使用 **anon／publishable key**，`service_role` 只能留在本機匯入腳本。
 

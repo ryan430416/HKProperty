@@ -207,6 +207,30 @@ button { cursor: pointer; }
 }
 .login-card { width: min(440px, 100%); }
 .login-card h2 { margin: 6px 0 8px; }
+.demo-banner {
+  background: #f4ead0;
+  color: #5c4813;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  padding: 8px 16px;
+  border-bottom: 1px solid #e4d5a5;
+}
+.demo-login { display: grid; gap: 10px; margin: 16px 0 8px; }
+.demo-login-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.login-actions { display: grid; gap: 8px; }
+.login-real {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.login-real summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.login-real .muted { margin: 10px 0 12px; }
 .avatar {
   width: 32px;
   height: 32px;

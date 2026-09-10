@@ -1,7 +1,8 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createClient } from '@supabase/supabase-js';
+import PocketBase from 'pocketbase';
+import { PB } from '../pocketbase/schema.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dryRun = process.argv.includes('--dry-run');
@@ -31,25 +32,29 @@ if (items.length !== 390) {
 }
 
 function mapItem(item) {
-  return {
+  const row = {
     property_id: String(item.propertyId),
     name: item.name,
-    purchase_date: item.purchaseDate || null,
-    service_life: Number.isFinite(item.serviceLife) ? item.serviceLife : null,
-    specification: item.specification || null,
-    unit: item.unit || null,
-    price: item.price ?? null,
-    department: item.department || null,
-    location: item.location || null,
-    custodian: item.custodian || null,
-    supplier: item.supplier || null,
+    service_life: Number.isFinite(item.serviceLife) ? item.serviceLife : 0,
+    specification: item.specification || '',
+    unit: item.unit || '',
+    price: item.price ?? 0,
+    department: item.department || '',
+    location: item.location || '',
+    custodian: item.custodian || '',
+    supplier: item.supplier || '',
     asset_status: item.status === '正常' ? 'normal' : (item.status || 'normal'),
-    note: item.note || null,
-    brand: item.brand || null,
-    model: item.model || null,
+    availability_status: 'available',
+    usage_count: 0,
+    note: item.note || '',
+    brand: item.brand || '',
+    model: item.model || '',
     is_borrowable: true,
-    is_active: true
+    is_active: true,
+    audit_status: '待盤點'
   };
+  if (item.purchaseDate) row.purchase_date = item.purchaseDate;
+  return row;
 }
 
 if (dryRun) {
@@ -64,27 +69,25 @@ if (dryRun) {
   process.exit(ids.length === unique.size ? 0 : 1);
 }
 
-const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-if (!url || !serviceKey) {
-  console.error('請在本機 .env 設定 SUPABASE_URL（或 VITE_SUPABASE_URL）與 SUPABASE_SERVICE_ROLE_KEY。此腳本不可在前端執行。');
-  process.exit(1);
-}
-if (!serviceKey.includes('service_role') && serviceKey.length < 20) {
-  console.error('SUPABASE_SERVICE_ROLE_KEY 看起來不正確');
+const url = process.env.POCKETBASE_URL || process.env.VITE_POCKETBASE_URL;
+const adminEmail = process.env.POCKETBASE_ADMIN_EMAIL;
+const adminPassword = process.env.POCKETBASE_ADMIN_PASSWORD;
+if (!url || !adminEmail || !adminPassword) {
+  console.error('請在本機 .env 設定 VITE_POCKETBASE_URL（或 POCKETBASE_URL）、POCKETBASE_ADMIN_EMAIL、POCKETBASE_ADMIN_PASSWORD。');
   process.exit(1);
 }
 
-const supabase = createClient(url, serviceKey, { auth: { persistSession: false } });
-
-const { data: existing, error: existingError } = await supabase
-  .from('assets')
-  .select('id, property_id, availability_status, usage_count, current_loan_id');
-if (existingError) {
-  console.error(existingError.message);
-  process.exit(1);
+const pb = new PocketBase(url);
+pb.autoCancellation(false);
+try {
+  await pb.collection('_superusers').authWithPassword(adminEmail, adminPassword);
+} catch {
+  if (!pb.admins?.authWithPassword) throw new Error('PocketBase 管理者登入失敗');
+  await pb.admins.authWithPassword(adminEmail, adminPassword);
 }
-const byPropertyId = new Map((existing || []).map((row) => [row.property_id, row]));
+
+const existing = await pb.collection(PB.assets).getFullList({ fields: 'id,property_id,availability_status,usage_count,current_loan' });
+const byPropertyId = new Map(existing.map((row) => [row.property_id, row]));
 
 let inserted = 0;
 let updated = 0;
@@ -96,11 +99,10 @@ for (const item of items) {
   const found = byPropertyId.get(row.property_id);
   try {
     if (!found) {
-      const { error } = await supabase.from('assets').insert(row);
-      if (error) throw error;
+      await pb.collection(PB.assets).create(row);
       inserted += 1;
     } else {
-      const { error } = await supabase.from('assets').update({
+      await pb.collection(PB.assets).update(found.id, {
         name: row.name,
         purchase_date: row.purchase_date,
         service_life: row.service_life,
@@ -115,8 +117,7 @@ for (const item of items) {
         note: row.note,
         brand: row.brand,
         model: row.model
-      }).eq('property_id', row.property_id);
-      if (error) throw error;
+      });
       updated += 1;
     }
   } catch (error) {
@@ -130,7 +131,7 @@ console.log(JSON.stringify({
   inserted,
   updated,
   skipped,
-  unchangedExisting: (existing || []).length,
+  unchangedExisting: existing.length,
   errors
 }, null, 2));
 if (errors.length) process.exit(1);

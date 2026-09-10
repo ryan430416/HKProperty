@@ -9,3 +9,10 @@ dist/
 *.log
 .vscode/
 .idea/
+pb_data/
+/pocketbase.exe
+/pocketbase
+!/pocketbase/
+!/pocketbase/**
+pocketbase*.zip
+

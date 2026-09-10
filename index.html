@@ -36,10 +36,11 @@
         <button type="button" class="nav-item" data-min-role="staff" data-view="settings">系統設定</button>
       </nav>
       <button type="button" class="scan-btn" id="scanBtn">掃描財產 QR Code</button>
-      <p class="side-foot">資料儲存在雲端資料庫，可在不同裝置同步</p>
+      <p class="side-foot" id="sideFoot">測試模式可先用假帳號進入，資料只存在此瀏覽器</p>
     </aside>
 
     <div class="shell">
+      <div id="demoBanner" class="demo-banner" hidden>測試模式：資料只存在此瀏覽器，權限未鎖定，方便先測功能。</div>
       <header class="topbar">
         <button type="button" class="icon-btn menu-btn" id="menuBtn" aria-label="開啟選單" aria-controls="sidebar">
           <span></span><span></span><span></span>
@@ -74,29 +75,45 @@
         </div>
       </header>
 
-        <div id="authGate" class="auth-gate" hidden>
+        <div id="authGate" class="auth-gate">
           <article class="panel login-card">
-            <p class="eyebrow">弘光科技大學</p>
-            <h2>登入財產盤點系統</h2>
-            <p class="muted">請使用學校電子郵件收取登入連結或一次性密碼。新帳號預設為借用人。</p>
-            <form id="loginForm">
-              <div class="field">
-                <label for="loginEmail">電子郵件 <span class="req">必填</span></label>
-                <input id="loginEmail" type="email" autocomplete="email" required />
-                <p class="field-error" id="loginEmailError"></p>
+            <p class="eyebrow">測試模式</p>
+            <h2>先測功能，不必正式登入</h2>
+            <p class="muted">資料只存在這個瀏覽器分頁。預設以「借用人」進入；若要看經辦或管理畫面再另外選。</p>
+            <div class="demo-login">
+              <button type="button" class="primary" id="demoBorrowerBtn">以借用人進入測試</button>
+              <div class="demo-login-row">
+                <button type="button" class="secondary" id="demoStaffBtn">以經辦人員進入</button>
+                <button type="button" class="ghost-btn" id="demoAdminBtn">以管理者進入</button>
               </div>
-              <div class="field">
-                <label for="loginOtp">一次性密碼（若信件提供）</label>
-                <input id="loginOtp" inputmode="numeric" autocomplete="one-time-code" placeholder="選填，有驗證碼再填" />
-              </div>
-              <div class="ss-sticky">
-                <button type="submit" class="primary" id="loginSubmitBtn">寄送登入連結</button>
-              </div>
-            </form>
-            <p class="muted ss-foot">未登入時不會顯示借用者姓名、學號或聯絡方式。</p>
+            </div>
+            <details class="login-real" hidden>
+              <summary>使用 PocketBase 正式登入</summary>
+              <p class="muted">正式上線再開。新帳號預設為借用人。</p>
+              <form id="loginForm">
+                <div class="field">
+                  <label for="loginEmail">電子郵件 <span class="req">必填</span></label>
+                  <input id="loginEmail" type="email" autocomplete="email" />
+                  <p class="field-error" id="loginEmailError"></p>
+                </div>
+                <div class="field">
+                  <label for="loginPassword">密碼 <span class="req">必填</span></label>
+                  <input id="loginPassword" type="password" autocomplete="current-password" minlength="8" />
+                </div>
+                <div class="field">
+                  <label for="loginOtp">一次性密碼（選填）</label>
+                  <input id="loginOtp" inputmode="numeric" autocomplete="one-time-code" placeholder="有驗證碼再填" />
+                </div>
+                <div class="ss-sticky login-actions">
+                  <button type="submit" class="primary" id="loginSubmitBtn">登入</button>
+                  <button type="button" class="secondary" id="registerBtn">註冊借用人帳號</button>
+                  <button type="button" class="ghost-btn" id="otpBtn">寄送一次性密碼</button>
+                </div>
+              </form>
+            </details>
           </article>
         </div>
-        <main id="main">
+        <main id="main" hidden>
         <div id="loading" class="loading" hidden>
           <div class="spinner" aria-hidden="true"></div>
           <p>資料載入中…</p>

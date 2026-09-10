@@ -1,7 +1,10 @@
+import { PB } from '../pocketbase/schema.mjs';
 import { AUDIT_STATUS, PLACEHOLDER_IMAGE } from '../js/format.js';
-import { isStaff } from './authService.js';
+import { isDemoMode, isStaff } from './authService.js';
+import { demoAssets, demoSavePhoto, demoSetActive } from './demoStore.js';
+import { hkpPost } from './hkpApi.js';
+import { pbMessage, requireClient } from './pocketbaseClient.js';
 import { publicImageUrl, uploadAssetImage } from './storageService.js';
-import { requireClient, throwIfError } from './supabaseClient.js';
 
 export const AVAILABILITY = {
   AVAILABLE: 'available',
@@ -21,14 +24,16 @@ export const AVAILABILITY_LABEL = {
   lost: '異常'
 };
 
+const BASIC_FIELDS = 'id,property_id,name,location,department,specification,unit,availability_status,usage_count,is_borrowable,is_active,current_loan,audit_status,last_audit_at,created,updated,photo';
+
 let cache = [];
 let loaded = false;
 let overdueAssetIds = new Set();
 
-function primaryImage(row) {
-  const images = row.asset_images || row.images || [];
-  const primary = images.find((img) => img.is_primary) || images[0];
-  return primary?.storage_path ? publicImageUrl(primary.storage_path) : PLACEHOLDER_IMAGE;
+function photoName(row) {
+  if (!row?.photo) return '';
+  if (typeof row.photo === 'string' && row.photo.startsWith('data:')) return row.photo;
+  return Array.isArray(row.photo) ? row.photo[0] : row.photo;
 }
 
 export function mapAsset(row) {
@@ -36,6 +41,7 @@ export function mapAsset(row) {
   if (availabilityStatus === AVAILABILITY.CHECKED_OUT && overdueAssetIds.has(row.id)) {
     availabilityStatus = AVAILABILITY.OVERDUE;
   }
+  const filename = photoName(row);
   return {
     id: row.id,
     propertyId: String(row.property_id),
@@ -61,10 +67,11 @@ export function mapAsset(row) {
     auditStatus: row.audit_status || AUDIT_STATUS.PENDING,
     availabilityStatus,
     availabilityLabel: AVAILABILITY_LABEL[availabilityStatus] || AVAILABILITY_LABEL.available,
-    currentLoanId: row.current_loan_id || null,
+    currentLoanId: row.current_loan || null,
     returnAlert: row.return_alert || null,
-    image: primaryImage(row),
-    hasCustomImage: Boolean((row.asset_images || []).length)
+    image: !filename ? PLACEHOLDER_IMAGE : filename.startsWith('data:') ? filename : publicImageUrl(row, filename),
+    hasCustomImage: Boolean(filename),
+    _raw: row
   };
 }
 
@@ -84,15 +91,26 @@ export function setOverdueAssetIds(ids) {
 }
 
 export async function loadCatalog() {
+  if (isDemoMode()) {
+    cache = demoAssets().map(mapAsset);
+    loaded = true;
+    return listItems();
+  }
   const client = requireClient();
   const staff = isStaff();
-  const table = staff ? 'assets' : 'assets_basic';
-  let query = client.from(table).select(staff ? '*, asset_images(*)' : '*').order('property_id');
-  const { data, error } = await query;
-  throwIfError(error, '無法載入財產清冊');
-  cache = (data || []).map(mapAsset);
-  loaded = true;
-  return listItems();
+  try {
+    const options = { sort: 'property_id' };
+    if (!staff) {
+      options.filter = 'is_active = true';
+      options.fields = BASIC_FIELDS;
+    }
+    const data = await client.collection(PB.assets).getFullList(options);
+    cache = (data || []).map(mapAsset);
+    loaded = true;
+    return listItems();
+  } catch (error) {
+    throw new Error(pbMessage(error, '無法載入財產清冊'));
+  }
 }
 
 export function isCatalogLoaded() {
@@ -157,7 +175,8 @@ export function getStats() {
 export async function saveImage(propertyId, file) {
   const item = getItem(propertyId);
   if (!item) throw new Error('找不到財產');
-  await uploadAssetImage(item.id, file);
+  if (isDemoMode()) await demoSavePhoto(item.id, file);
+  else await uploadAssetImage(item.id, file);
   await loadCatalog();
   return getItem(propertyId);
 }
@@ -165,12 +184,8 @@ export async function saveImage(propertyId, file) {
 export async function setAssetActive(propertyId, isActive) {
   const item = getItem(propertyId);
   if (!item) throw new Error('找不到財產');
-  const client = requireClient();
-  const { error } = await client.rpc('admin_set_asset_active', {
-    p_asset_id: item.id,
-    p_is_active: isActive
-  });
-  throwIfError(error, '無法更新財產狀態');
+  if (isDemoMode()) demoSetActive(item.id, isActive);
+  else await hkpPost(`/api/hkp/assets/${item.id}/active`, { is_active: isActive });
   await loadCatalog();
   return getItem(propertyId);
 }

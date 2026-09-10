@@ -1,31 +1,34 @@
-import { requireClient, throwIfError } from './supabaseClient.js';
-import { getItem, loadCatalog } from './inventoryService.js';
+import { PB } from '../pocketbase/schema.mjs';
+import { isDemoMode } from './authService.js';
+import { demoAddUsage, demoUsage } from './demoStore.js';
 import { isCurrentMonth } from '../js/format.js';
+import { getItem, loadCatalog } from './inventoryService.js';
+import { getFullList, hkpPost, relationId } from './hkpApi.js';
 
 let cache = [];
 
 export function mapUsage(row, item) {
+  const assetId = relationId(row.asset) || row.asset_id;
   return {
     id: row.id,
     propertyId: item?.propertyId || row.property_id,
-    assetId: row.asset_id,
+    assetId,
     userName: row.user_name,
     department: row.department,
     usedAt: row.used_at,
     purpose: row.purpose,
     note: row.note || '',
-    loanId: row.loan_id
+    loanId: relationId(row.loan) || row.loan_id
   };
 }
 
 export async function loadUsage() {
-  const client = requireClient();
-  const { data, error } = await client
-    .from('usage_records')
-    .select('*')
-    .order('used_at', { ascending: false });
-  throwIfError(error, '無法載入使用紀錄');
-  cache = (data || []).map((row) => mapUsage(row, getItem(row.asset_id)));
+  if (isDemoMode()) {
+    cache = demoUsage().map((row) => mapUsage(row, getItem(relationId(row.asset))));
+    return cache;
+  }
+  const rows = await getFullList(PB.usage, { sort: '-used_at' });
+  cache = (rows || []).map((row) => mapUsage(row, getItem(relationId(row.asset))));
   return cache;
 }
 
@@ -38,16 +41,23 @@ export function listUsage(propertyId) {
 export async function addUsage({ propertyId, userName, department, usedAt, purpose, note }) {
   const item = getItem(propertyId);
   if (!item) throw new Error('找不到財產');
-  const client = requireClient();
-  const { data, error } = await client.rpc('record_asset_usage', {
-    p_asset_id: item.id,
-    p_user_name: userName,
-    p_department: department,
-    p_used_at: new Date(usedAt).toISOString(),
-    p_purpose: purpose,
-    p_note: note || null
+  const data = isDemoMode()
+    ? demoAddUsage({
+      asset_id: item.id,
+      user_name: userName,
+      department,
+      used_at: new Date(usedAt).toISOString(),
+      purpose,
+      note: note || null
+    })
+    : await hkpPost('/api/hkp/usage', {
+    asset_id: item.id,
+    user_name: userName,
+    department,
+    used_at: new Date(usedAt).toISOString(),
+    purpose,
+    note: note || null
   });
-  throwIfError(error, '現場使用登記失敗');
   await loadCatalog();
   await loadUsage();
   return { entry: mapUsage(data, item), item: getItem(propertyId) };

@@ -64,13 +64,16 @@ import {
   isAdmin,
   isStaff,
   listProfiles,
+  registerWithPassword,
   roleLabel,
   sendLoginOtp,
+  enterDemoSession,
+  isDemoMode,
+  signInWithPassword,
   signOut,
   updateMyProfile,
   verifyEmailOtp
 } from '../services/authService.js';
-import { getSupabaseConfigError } from '../services/supabaseClient.js';
 import { clearLegacyLocalData, detectLegacyLocalData } from '../services/legacyLocalData.js';
 
 const PAGE_META = {
@@ -122,6 +125,7 @@ async function refreshData() {
 }
 
 function applyRoleNav() {
+  const demo = isDemoMode();
   const staff = isStaff();
   const admin = isAdmin();
   document.querySelectorAll('[data-min-role]').forEach((el) => {
@@ -131,9 +135,15 @@ function applyRoleNav() {
   });
   const profile = getProfile();
   $('userName').textContent = profile?.display_name || '使用者';
-  $('userRole').textContent = roleLabel(profile?.role);
+  $('userRole').textContent = demo ? `${roleLabel(profile?.role)}（測試）` : roleLabel(profile?.role);
   $('userAvatar').textContent = (profile?.display_name || '用').slice(0, 1);
   $('logoutBtn').hidden = !profile;
+  if ($('demoBanner')) $('demoBanner').hidden = !demo;
+  if ($('sideFoot')) {
+    $('sideFoot').textContent = demo
+      ? '測試模式：資料只存在此瀏覽器，關閉分頁後會消失'
+      : '資料儲存在雲端資料庫，可在不同裝置同步';
+  }
 }
 
 function showAuthGate(on) {
@@ -1497,20 +1507,35 @@ function bindEvents() {
     }
   });
 
+  async function startDemo(role) {
+    try {
+      await enterDemoSession(role);
+      toast(role === 'borrower' ? '已進入測試（借用人）' : `已進入測試（${role === 'admin' ? '管理者' : '經辦'}）`);
+      await bootApp();
+    } catch (error) {
+      toast(error.message || '無法進入測試', 'error');
+    }
+  }
+  $('demoAdminBtn').addEventListener('click', () => startDemo('admin'));
+  $('demoStaffBtn').addEventListener('click', () => startDemo('staff'));
+  $('demoBorrowerBtn').addEventListener('click', () => startDemo('borrower'));
+
   $('loginForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     const btn = $('loginSubmitBtn');
     btn.disabled = true;
     try {
       const email = $('loginEmail').value;
+      const password = $('loginPassword').value;
       const otp = $('loginOtp').value.trim();
       if (otp) {
         await verifyEmailOtp(email, otp);
         toast('登入成功');
         await bootApp();
       } else {
-        await sendLoginOtp(email);
-        toast('已寄送登入連結，請至信箱查收');
+        await signInWithPassword(email, password);
+        toast('登入成功');
+        await bootApp();
       }
     } catch (error) {
       toast(error.message || '登入失敗', 'error');
@@ -1518,8 +1543,30 @@ function bindEvents() {
       btn.disabled = false;
     }
   });
+  $('registerBtn').addEventListener('click', async () => {
+    const btn = $('registerBtn');
+    btn.disabled = true;
+    try {
+      await registerWithPassword($('loginEmail').value, $('loginPassword').value);
+      toast('已註冊並登入，預設為借用人');
+      await bootApp();
+    } catch (error) {
+      toast(error.message || '註冊失敗', 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  $('otpBtn').addEventListener('click', async () => {
+    try {
+      await sendLoginOtp($('loginEmail').value);
+      toast('已寄送一次性密碼，請至信箱查收後填入驗證碼再登入');
+    } catch (error) {
+      toast(error.message || '無法寄送驗證碼', 'error');
+    }
+  });
   $('logoutBtn').addEventListener('click', async () => {
     await signOut();
+    applyRoleNav();
     showAuthGate(true);
     toast('已登出');
   });
@@ -1634,13 +1681,6 @@ async function bootApp() {
 async function init() {
   bindEvents();
   $('loadError').hidden = true;
-  const configError = getSupabaseConfigError();
-  if (configError) {
-    showAuthGate(true);
-    showLoadError(configError);
-    toast('請先設定 Supabase 環境變數', 'error');
-    return;
-  }
   setLoading(true, '檢查登入狀態…');
   await initAuth(async (profile) => {
     if (profile) await bootApp();

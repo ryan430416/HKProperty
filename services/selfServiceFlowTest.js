@@ -1,4 +1,4 @@
-import { snapshotAppStorage, restoreAppStorage, clearOperationalData } from './storageService.js';
+import { snapshotAppStorage, restoreAppStorage, clearOperationalData } from './legacySnapshots.js';
 import { AVAILABILITY, getItem, getStats, listItems } from './inventoryService.js';
 import {
   CHECKOUT_METHOD,

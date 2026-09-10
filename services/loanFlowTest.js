@@ -1,4 +1,4 @@
-import { snapshotAppStorage, restoreAppStorage } from './storageService.js';
+import { snapshotAppStorage, restoreAppStorage } from './legacySnapshots.js';
 import { AVAILABILITY, getItem, listItems } from './inventoryService.js';
 import { checkin, checkout, getOpenLoan } from './loanService.js';
 

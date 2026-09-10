@@ -6,13 +6,14 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "setup:pocketbase": "node scripts/setup-pocketbase.mjs",
     "import:assets": "node scripts/import-assets.mjs",
-    "test:schema": "node tools/sql_schema.test.mjs"
-  },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.57.4"
+    "test:schema": "node tools/pb_schema.test.mjs"
   },
   "devDependencies": {
     "vite": "^6.3.5"
+  },
+  "dependencies": {
+    "pocketbase": "^0.28.1"
   }
 }

@@ -1,5 +1,9 @@
+import { PB } from '../pocketbase/schema.mjs';
+import { isDemoMode } from './authService.js';
+import { demoApprove, demoCheckout, demoCompleteCheckout, demoLoans, demoLogs, demoReject, demoReturn, demoSaveSettings, demoSettings } from './demoStore.js';
 import { getItem, loadCatalog, setOverdueAssetIds } from './inventoryService.js';
-import { requireClient, throwIfError } from './supabaseClient.js';
+import { getFullList, hkpPost, relationId } from './hkpApi.js';
+import { pbMessage } from './pocketbaseClient.js';
 
 export const LOAN_STATUS = {
   PENDING: 'pending',
@@ -66,15 +70,23 @@ function toDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function isOverdueRow(row, now = new Date()) {
+  if (row.returned_at || row.status === 'returned') return false;
+  if (row.status !== 'checked_out' && row.status !== 'overdue') return false;
+  const expected = toDate(row.expected_return_at);
+  return Boolean(expected && now.getTime() > expected.getTime());
+}
+
 export function mapLoan(row) {
-  const display = row.display_status || row.status;
+  const overdue = isOverdueRow(row);
+  const display = overdue ? 'overdue' : row.status;
   return {
     recordId: row.id,
     id: row.loan_number,
     propertyId: row.property_id,
     propertyName: row.property_name,
-    assetId: row.asset_id,
-    borrowerProfileId: row.borrower_id,
+    assetId: relationId(row.asset) || row.asset_id,
+    borrowerProfileId: relationId(row.borrower) || row.borrower_id,
     borrowerName: row.borrower_name,
     borrowerId: row.borrower_number,
     borrowerDepartment: row.borrower_department,
@@ -94,9 +106,9 @@ export function mapLoan(row) {
     rawStatus: row.status,
     rejectionReason: row.rejection_reason,
     note: row.note || '',
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    isOverdue: Boolean(row.is_overdue)
+    createdAt: row.created,
+    updatedAt: row.updated,
+    isOverdue: overdue
   };
 }
 
@@ -105,34 +117,45 @@ export function getSettings() {
 }
 
 export async function loadSettings() {
-  const client = requireClient();
-  const { data, error } = await client.rpc('get_system_settings');
-  if (!error && data) {
-    settings = Array.isArray(data) ? data[0] : data;
+  if (isDemoMode()) {
+    settings = demoSettings();
+    return settings;
+  }
+  try {
+    const rows = await getFullList(PB.settings, { sort: '-created' });
+    if (rows[0]) settings = rows[0];
+  } catch {
+    // keep defaults
   }
   return settings;
 }
 
 export async function saveSettings(patch) {
-  const client = requireClient();
-  const { data, error } = await client.rpc('admin_update_settings', {
-    p_require_loan_approval: patch.requireLoanApproval,
-    p_allow_self_checkout: patch.allowSelfCheckout,
-    p_default_loan_days: patch.defaultLoanDays
+  if (isDemoMode()) {
+    settings = demoSaveSettings({
+      require_loan_approval: patch.requireLoanApproval,
+      allow_self_checkout: patch.allowSelfCheckout,
+      default_loan_days: patch.defaultLoanDays
+    });
+    return settings;
+  }
+  const data = await hkpPost('/api/hkp/settings', {
+    require_loan_approval: patch.requireLoanApproval,
+    allow_self_checkout: patch.allowSelfCheckout,
+    default_loan_days: patch.defaultLoanDays
   });
-  throwIfError(error, '無法更新系統設定');
   settings = data;
   return settings;
 }
 
 export async function loadLoans() {
-  const client = requireClient();
-  const { data, error } = await client
-    .from('loan_records_view')
-    .select('*')
-    .order('requested_at', { ascending: false });
-  throwIfError(error, '無法載入借用紀錄');
-  cache = (data || []).map(mapLoan);
+  if (isDemoMode()) {
+    cache = demoLoans().map(mapLoan);
+    setOverdueAssetIds(cache.filter((loan) => loan.isOverdue).map((loan) => loan.assetId));
+    return cache;
+  }
+    const rows = await getFullList(PB.loans, { sort: '-requested_at' });
+  cache = (rows || []).map(mapLoan);
   setOverdueAssetIds(cache.filter((loan) => loan.isOverdue).map((loan) => loan.assetId));
   return cache;
 }
@@ -148,14 +171,17 @@ export function listActivity() {
 }
 
 export async function loadOperationLogs() {
-  const client = requireClient();
-  const { data, error } = await client
-    .from('operation_logs')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(200);
-  throwIfError(error, '無法載入操作紀錄');
-  return data || [];
+  if (isDemoMode()) return demoLogs();
+  try {
+    const rows = await getFullList(PB.logs, { sort: '-created' });
+    return (rows || []).slice(0, 200).map((row) => ({
+      ...row,
+      created_at: row.created,
+      actor_name: row.actor_name
+    }));
+  } catch (error) {
+    throw new Error(pbMessage(error, '無法載入操作紀錄'));
+  }
 }
 
 export function getLoan(loanId) {
@@ -249,33 +275,45 @@ export async function assertAvailableForCheckout(propertyId) {
 
 export async function checkout(payload) {
   const item = await assertAvailableForCheckout(payload.propertyId);
-  const client = requireClient();
   const method = payload.checkoutMethod === CHECKOUT_METHOD.ADMIN ? CHECKOUT_METHOD.ADMIN : CHECKOUT_METHOD.SELF;
-  const { data, error } = await client.rpc('create_loan_request', {
-    p_asset_id: item.id,
-    p_borrower_name: payload.borrowerName,
-    p_borrower_number: payload.borrowerId,
-    p_borrower_department: payload.borrowerDepartment,
-    p_purpose: payload.purpose,
-    p_expected_return_at: new Date(payload.expectedReturnAt).toISOString(),
-    p_contact: payload.contact || null,
-    p_checkout_at: new Date(payload.checkedOutAt || Date.now()).toISOString(),
-    p_checkout_condition: payload.checkoutCondition || null,
-    p_note: payload.note || null,
-    p_checkout_method: method
-  });
-  throwIfError(error, '借出失敗');
+  const body = {
+    asset_id: item.id,
+    borrower_name: payload.borrowerName,
+    borrower_number: payload.borrowerId,
+    borrower_department: payload.borrowerDepartment,
+    purpose: payload.purpose,
+    expected_return_at: new Date(payload.expectedReturnAt).toISOString(),
+    contact: payload.contact || null,
+    checkout_at: new Date(payload.checkedOutAt || Date.now()).toISOString(),
+    checkout_condition: payload.checkoutCondition || null,
+    note: payload.note || null,
+    checkout_method: method
+  };
+  const data = isDemoMode()
+    ? demoCheckout({
+      assetId: item.id,
+      propertyId: item.propertyId,
+      borrower_name: body.borrower_name,
+      borrower_number: body.borrower_number,
+      borrower_department: body.borrower_department,
+      purpose: body.purpose,
+      expected_return_at: body.expected_return_at,
+      contact: body.contact,
+      checkout_at: body.checkout_at,
+      checkout_condition: body.checkout_condition,
+      note: body.note,
+      checkout_method: method
+    })
+    : await hkpPost('/api/hkp/loans', body);
   await Promise.all([loadCatalog(), loadLoans()]);
-  const entry = mapLoan({ ...data, property_id: item.propertyId, property_name: item.name });
-  return { entry, item: getItem(item.propertyId) };
+  return { entry: mapLoan(data), item: getItem(item.propertyId) };
 }
 
 export async function approveLoan(loanId) {
   const loan = getLoan(loanId);
   if (!loan) throw new Error('找不到借用申請');
-  const client = requireClient();
-  const { error } = await client.rpc('approve_loan_request', { p_loan_id: loan.recordId });
-  throwIfError(error, '核准失敗');
+  if (isDemoMode()) demoApprove(loan.recordId);
+  else await hkpPost(`/api/hkp/loans/${loan.recordId}/approve`);
   await Promise.all([loadCatalog(), loadLoans()]);
   return getLoan(loan.id);
 }
@@ -283,9 +321,8 @@ export async function approveLoan(loanId) {
 export async function rejectLoan(loanId, reason) {
   const loan = getLoan(loanId);
   if (!loan) throw new Error('找不到借用申請');
-  const client = requireClient();
-  const { error } = await client.rpc('reject_loan_request', { p_loan_id: loan.recordId, p_reason: reason });
-  throwIfError(error, '拒絕失敗');
+  if (isDemoMode()) demoReject(loan.recordId, reason);
+  else await hkpPost(`/api/hkp/loans/${loan.recordId}/reject`, { reason });
   await Promise.all([loadCatalog(), loadLoans()]);
   return getLoan(loan.id);
 }
@@ -293,9 +330,8 @@ export async function rejectLoan(loanId, reason) {
 export async function completeCheckout(loanId) {
   const loan = getLoan(loanId);
   if (!loan) throw new Error('找不到借用申請');
-  const client = requireClient();
-  const { error } = await client.rpc('checkout_asset', { p_loan_id: loan.recordId });
-  throwIfError(error, '借出失敗');
+  if (isDemoMode()) demoCompleteCheckout(loan.recordId);
+  else await hkpPost(`/api/hkp/loans/${loan.recordId}/checkout`);
   await Promise.all([loadCatalog(), loadLoans()]);
   return { entry: getLoan(loan.id), item: getItem(loan.propertyId) };
 }
@@ -306,19 +342,22 @@ export async function checkin(payload) {
     ? getLoan(payload.loanId)
     : getOpenLoan(payload.propertyId);
   if (!loan) throw new Error('找不到未歸還的借用紀錄');
-  const client = requireClient();
   const result = payload.returnResult || '正常歸還';
   const args = {
-    p_loan_id: loan.recordId,
-    p_returned_at: new Date(payload.returnedAt).toISOString(),
-    p_return_location: payload.returnLocation,
-    p_return_result: result,
-    p_return_condition: payload.issueNote || payload.returnCondition || null,
-    p_note: payload.note || null
+    returned_at: new Date(payload.returnedAt).toISOString(),
+    return_location: payload.returnLocation,
+    return_result: result,
+    return_condition: payload.issueNote || payload.returnCondition || null,
+    note: payload.note || null
   };
-  const fn = payload.requestOnly ? 'request_asset_return' : 'complete_asset_return';
-  const { error } = await client.rpc(fn, args);
-  throwIfError(error, '歸還失敗');
+  if (isDemoMode()) {
+    demoReturn(loan.recordId, args);
+  } else {
+    const path = payload.requestOnly
+      ? `/api/hkp/loans/${loan.recordId}/return-request`
+      : `/api/hkp/loans/${loan.recordId}/return`;
+    await hkpPost(path, args);
+  }
   await Promise.all([loadCatalog(), loadLoans()]);
   return { entry: getLoan(loan.id), item: getItem(loan.propertyId || item?.propertyId) };
 }
@@ -334,9 +373,9 @@ export async function verifySelfServiceLoan(code, borrowerId) {
     throw new Error('查無符合的借用資料');
   }
   if (loan.returnedAt || loan.rawStatus === 'returned') throw new Error('此筆借用已完成歸還，不可重複歸還');
-  const item = getItem(loan.propertyId);
-  if (!item) throw new Error('查無此財產編號');
-  return { loan, item };
+  const found = getItem(loan.propertyId);
+  if (!found) throw new Error('查無此財產編號');
+  return { loan, item: found };
 }
 
 export async function lookupSelfServiceLoans(code, borrowerId) {
