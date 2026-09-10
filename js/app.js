@@ -13,7 +13,8 @@ import {
   auditStatusClass,
   availabilityClass
 } from './format.js';
-import { bindDialogBehavior, closeDialog, fillSelect, isSwitchingDialogs, openExclusiveDialog, setLoading, toast } from './ui.js';
+import { bindConfirmDialog, bindDialogBehavior, closeDialog, confirmAction, fillSelect, isSwitchingDialogs, openExclusiveDialog, setLoading, toast } from './ui.js';
+import { bindSelfService, openSelfMode, showHome } from './selfService.js';
 import { parseScanPayload, startCameraScan } from './scanner.js';
 import {
   AVAILABILITY,
@@ -29,10 +30,13 @@ import {
 import { addUsage, listUsage } from '../services/usageService.js';
 import { addAudit, confirmLocationUpdate, listAudits, listLocationChanges } from '../services/auditService.js';
 import { runLoanLifecycleTest } from '../services/loanFlowTest.js';
+import { runSelfServiceFlowTest } from '../services/selfServiceFlowTest.js';
 import {
+  CHECKOUT_METHOD,
   RETURN_RESULT,
   checkin,
   checkout,
+  checkoutMethodLabel,
   currentLoanOf,
   displayLoanStatus,
   exportLoansCsv,
@@ -47,9 +51,16 @@ import {
   overdueDuration,
   refreshOverdueStatus
 } from '../services/loanService.js';
+import {
+  clearOperationalData,
+  exportOperationalJson,
+  importOperationalJson,
+  storageUsageBytes
+} from '../services/storageService.js';
 
 const PAGE_META = {
   dashboard: ['財產管理', '系統總覽'],
+  selfService: ['自助服務', '自助借還'],
   inventory: ['財產查詢', '財產清冊'],
   loans: ['借用作業', '借出管理'],
   loanHistory: ['借用作業', '借用紀錄'],
@@ -175,6 +186,7 @@ function loanDueText(item) {
 
 function setView(view) {
   refreshOverdueStatus();
+  const previous = state.view;
   state.view = view;
   document.querySelectorAll('.view').forEach((el) => {
     el.hidden = el.id !== `view-${view}`;
@@ -187,6 +199,7 @@ function setView(view) {
   $('pageTitle').textContent = title;
   $('sidebar').classList.remove('open');
   $('sidebarBackdrop').hidden = true;
+  if (view === 'selfService' && previous !== 'selfService') showHome();
   render();
 }
 
@@ -429,7 +442,7 @@ function renderLoanHistory() {
   const data = paginate(rows, state.loanHistoryPage);
   state.loanHistoryPage = data.page;
   if (!data.total) {
-    $('loanHistoryBody').innerHTML = '<tr><td colspan="15"><div class="empty">找不到符合條件的借用紀錄</div></td></tr>';
+    $('loanHistoryBody').innerHTML = '<tr><td colspan="16"><div class="empty">找不到符合條件的借用紀錄</div></td></tr>';
     $('loanHistoryCards').innerHTML = '<div class="empty">找不到符合條件的借用紀錄</div>';
     $('loanHistoryPager').innerHTML = pagerHTML('loanHistory', data);
     return;
@@ -447,6 +460,7 @@ function renderLoanHistory() {
       <td>${esc(loan.returnedAt ? formatDateTime(loan.returnedAt) : '尚未歸還')}</td>
       <td>${esc(loan.purpose)}</td>
       <td>${esc(loan.returnOperator || loan.checkoutOperator)}</td>
+      <td>${esc(checkoutMethodLabel(loan))}</td>
       <td><span class="badge ${displayLoanStatus(loan) === '已逾期' ? 'alert' : displayLoanStatus(loan) === '借用中' ? 'loan' : 'ok'}">${esc(displayLoanStatus(loan))}</span></td>
       <td>${esc(loan.returnResult || '—')}</td>
       <td>${esc(loan.note || '—')}</td>
@@ -459,7 +473,7 @@ function renderLoanHistory() {
         <h3>${esc(loan.propertyName)}</h3>
         <div class="pid">${esc(loan.id)}</div>
         <div class="meta-row"><span>${esc(loan.borrowerName)}</span><span class="badge ${displayLoanStatus(loan) === '已逾期' ? 'alert' : 'loan'}">${esc(displayLoanStatus(loan))}</span></div>
-        <div class="muted">${esc(formatDateTime(loan.checkedOutAt))} → ${esc(loan.returnedAt ? formatDateTime(loan.returnedAt) : '尚未歸還')}</div>
+        <div class="muted">${esc(checkoutMethodLabel(loan))} · ${esc(formatDateTime(loan.checkedOutAt))} → ${esc(loan.returnedAt ? formatDateTime(loan.returnedAt) : '尚未歸還')}</div>
         <button type="button" class="link-btn" data-loan-detail="${esc(loan.id)}">查看完整紀錄</button>
       </div>
     </article>
@@ -524,6 +538,12 @@ function renderLocations() {
   `).join('');
 }
 
+function renderSettings() {
+  const usage = storageUsageBytes();
+  const kb = (usage.bytes / 1024).toFixed(1);
+  $('storageUsageText').textContent = `目前 localStorage 約使用 ${kb} KB（瀏覽器上限通常約 5 MB）。原始 390 筆財產清冊不在此儲存空間內。`;
+}
+
 function renderNotify() {
   const mismatch = listItems().filter((item) => item.auditStatus === AUDIT_STATUS.MISMATCH || item.auditStatus === AUDIT_STATUS.MISSING);
   const overdue = listItems().filter((item) => item.availabilityStatus === AVAILABILITY.OVERDUE);
@@ -553,6 +573,7 @@ function render() {
   if (state.view === 'audit') renderAuditPage();
   if (state.view === 'usage') renderUsagePage();
   if (state.view === 'locations') renderLocations();
+  if (state.view === 'settings') renderSettings();
 }
 
 function loanActionButtons(item) {
@@ -827,6 +848,7 @@ function openLoanDetail(loanId) {
     ['預計歸還時間', formatDateTime(loan.expectedReturnAt)],
     ['實際歸還時間', loan.returnedAt ? formatDateTime(loan.returnedAt) : '尚未歸還'],
     ['借用用途', loan.purpose],
+    ['借出方式', checkoutMethodLabel(loan)],
     ['借出經手人', loan.checkoutOperator],
     ['歸還經手人', loan.returnOperator || '—'],
     ['借出時狀況', displayValue(loan.checkoutCondition)],
@@ -880,7 +902,7 @@ function afterMutation(propertyId, message) {
 
 function restoreDetailAfterClose(closedId) {
   if (isSwitchingDialogs()) return;
-  if (closedId === 'detailDialog' || closedId === 'scanDialog' || closedId === 'loanDetailDialog') return;
+  if (closedId === 'detailDialog' || closedId === 'scanDialog' || closedId === 'loanDetailDialog' || closedId === 'appConfirmDialog') return;
   if (closedId === 'checkoutConfirmDialog') {
     if (state.pendingCheckout) openExclusiveDialog('checkoutDialog');
     else if (state.returnToDetailId) openItem(state.returnToDetailId);
@@ -909,10 +931,18 @@ function downloadCsv() {
 
 function bindEvents() {
   bindDialogBehavior(restoreDetailAfterClose);
+  bindConfirmDialog();
+  bindSelfService({ onChanged: () => render() });
   document.addEventListener('click', (event) => {
     const closer = event.target.closest('[data-close]');
     if (closer) {
       closeDialog(closer.dataset.close);
+      return;
+    }
+    const selfBtn = event.target.closest('[data-self]');
+    if (selfBtn) {
+      setView('selfService');
+      openSelfMode(selfBtn.dataset.self);
       return;
     }
     const nav = event.target.closest('[data-view]');
@@ -1105,15 +1135,22 @@ function bindEvents() {
 
   $('checkoutConfirmForm').addEventListener('submit', (event) => {
     event.preventDefault();
+    const btn = event.submitter || $('checkoutConfirmForm').querySelector('button[type="submit"]');
+    if (btn) btn.disabled = true;
     try {
       if (!state.pendingCheckout) throw new Error('找不到待確認的借出資料');
-      const { item } = checkout(state.pendingCheckout);
+      const { item } = checkout({
+        ...state.pendingCheckout,
+        checkoutMethod: CHECKOUT_METHOD.ADMIN
+      });
       state.pendingCheckout = null;
       closeDialog('checkoutConfirmDialog', { silent: true });
       closeDialog('checkoutDialog', { silent: true });
       afterMutation(item.propertyId, '已完成借出，使用次數已更新');
     } catch (error) {
       toast(error.message || '借出失敗', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
     }
   });
 
@@ -1278,6 +1315,16 @@ function bindEvents() {
     }
   });
 
+  const showTestResult = (result) => {
+    const box = $('loanTestResult');
+    box.hidden = false;
+    box.innerHTML = `
+      <p><strong>${result.ok ? '測試通過' : '測試未通過'}</strong>${result.propertyId ? ` · 測試財產 ${esc(result.propertyId)}` : ''}${result.loanId ? ` · ${esc(result.loanId)}` : ''}</p>
+      ${result.steps.map((step) => `<div class="feed-item"><strong>${esc(step.name)}</strong><div class="muted">${esc(step.detail || '')}</div></div>`).join('')}
+    `;
+    toast(result.ok ? '流程測試通過，測試資料已還原' : (result.error || '流程測試未通過'), result.ok ? 'ok' : 'error');
+  };
+
   $('runLoanTestBtn').addEventListener('click', () => {
     const box = $('loanTestResult');
     box.hidden = false;
@@ -1285,15 +1332,62 @@ function bindEvents() {
     try {
       const result = runLoanLifecycleTest();
       render();
-      box.innerHTML = `
-        <p><strong>${result.ok ? '測試通過' : '測試未通過'}</strong>${result.propertyId ? ` · 測試財產 ${esc(result.propertyId)}` : ''}</p>
-        ${result.steps.map((step) => `<div class="feed-item"><strong>${esc(step.name)}</strong><div class="muted">${esc(step.detail || '')}</div></div>`).join('')}
-      `;
-      toast(result.ok ? '借出流程測試通過，測試資料已清除' : (result.error || '借出流程測試未通過'), result.ok ? 'ok' : 'error');
+      showTestResult(result);
     } catch (error) {
       box.innerHTML = `<p class="muted">${esc(error.message)}</p>`;
       toast(error.message || '測試失敗', 'error');
     }
+  });
+  $('runSelfServiceTestBtn').addEventListener('click', () => {
+    const box = $('loanTestResult');
+    box.hidden = false;
+    box.innerHTML = '<p class="muted">測試進行中…</p>';
+    try {
+      const result = runSelfServiceFlowTest();
+      render();
+      showTestResult(result);
+    } catch (error) {
+      box.innerHTML = `<p class="muted">${esc(error.message)}</p>`;
+      toast(error.message || '測試失敗', 'error');
+    }
+  });
+
+  $('exportTestDataBtn').addEventListener('click', () => {
+    const blob = new Blob([JSON.stringify(exportOperationalJson(), null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `hkproperty-test-data-${formatDate(new Date().toISOString())}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    toast('已匯出測試資料 JSON');
+  });
+  $('importTestDataInput').addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const payload = JSON.parse(await file.text());
+      importOperationalJson(payload);
+      render();
+      toast('已匯入測試資料');
+    } catch (error) {
+      toast(error.message || '匯入失敗，請確認 JSON 格式', 'error');
+    }
+  });
+  $('clearTestDataBtn').addEventListener('click', async () => {
+    const ok = await confirmAction({
+      title: '清除測試資料',
+      text: '將清除借用、使用、圖片、盤點及位置異動紀錄，並讓全部財產恢復可借用。390 筆原始財產清冊不會被刪除。此操作無法復原。',
+      confirmLabel: '確認清除',
+      cancelLabel: '取消'
+    });
+    if (!ok) return;
+    clearOperationalData();
+    render();
+    toast(`測試資料已清除，財產清冊仍為 ${listItems().length} 筆`);
   });
 
   document.addEventListener('keydown', (event) => {

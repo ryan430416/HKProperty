@@ -82,7 +82,7 @@ const second = inventory.getItem('820091002');
 loan.checkout({
   propertyId: second.propertyId,
   borrowerName: '送修測試',
-  borrowerId: 'S1',
+  borrowerId: 'ST01',
   borrowerDepartment: '課外組',
   checkedOutAt: new Date().toISOString(),
   expectedReturnAt: new Date(Date.now() + 3600000).toISOString(),

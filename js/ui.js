@@ -129,3 +129,48 @@ function escapeAttr(value) {
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]
   ));
 }
+
+let confirmResolver = null;
+
+function settleConfirm(ok) {
+  const resolve = confirmResolver;
+  confirmResolver = null;
+  resolve?.(ok);
+}
+
+export function bindConfirmDialog() {
+  const form = document.getElementById('appConfirmForm');
+  const dialog = document.getElementById('appConfirmDialog');
+  if (!form || !dialog) return;
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    closeDialog('appConfirmDialog', { silent: true });
+    settleConfirm(true);
+  });
+  form.querySelector('[data-confirm-cancel]')?.addEventListener('click', () => {
+    closeDialog('appConfirmDialog', { silent: true });
+    settleConfirm(false);
+  });
+  dialog.addEventListener('close', () => {
+    if (confirmResolver) settleConfirm(false);
+  });
+}
+
+export function confirmAction({
+  title = '請確認',
+  text = '',
+  confirmLabel = '確認',
+  cancelLabel = '取消'
+} = {}) {
+  const dialog = document.getElementById('appConfirmDialog');
+  if (!dialog) return Promise.resolve(false);
+  document.getElementById('appConfirmTitle').textContent = title;
+  document.getElementById('appConfirmText').textContent = text;
+  document.getElementById('appConfirmOk').textContent = confirmLabel;
+  const cancel = dialog.querySelector('[data-confirm-cancel]');
+  if (cancel) cancel.textContent = cancelLabel;
+  return new Promise((resolve) => {
+    confirmResolver = resolve;
+    openExclusiveDialog('appConfirmDialog');
+  });
+}

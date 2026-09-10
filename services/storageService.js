@@ -11,7 +11,8 @@ export const STORAGE_KEYS = {
   usage: 'hkproperty_usage_records',
   audits: 'hkproperty_audit_records',
   locations: 'hkproperty_location_records',
-  images: 'hkproperty_images'
+  images: 'hkproperty_images',
+  activity: 'hkproperty_activity_records'
 };
 
 function parse(raw, fallback) {
@@ -68,6 +69,7 @@ export function migrateLegacyStorage() {
   migrateList(LEGACY.locations, STORAGE_KEYS.locations);
   if (!localStorage.getItem(STORAGE_KEYS.loans)) writeStore(STORAGE_KEYS.loans, []);
   if (!localStorage.getItem(STORAGE_KEYS.images)) writeStore(STORAGE_KEYS.images, {});
+  if (!localStorage.getItem(STORAGE_KEYS.activity)) writeStore(STORAGE_KEYS.activity, []);
 }
 
 export function restoreAppStorage(snap) {
@@ -83,4 +85,45 @@ export function snapshotAppStorage() {
     snap[key] = localStorage.getItem(key);
   }
   return snap;
+}
+
+export function storageUsageBytes() {
+  let chars = 0;
+  const details = [];
+  for (const [name, key] of Object.entries(STORAGE_KEYS)) {
+    const raw = localStorage.getItem(key) || '';
+    chars += raw.length;
+    details.push({ name, key, bytes: raw.length * 2 });
+  }
+  return { bytes: chars * 2, details };
+}
+
+export function exportOperationalJson() {
+  const data = {};
+  for (const [name, key] of Object.entries(STORAGE_KEYS)) {
+    data[name] = readStore(key, key.includes('image') || name === 'overrides' ? {} : []);
+  }
+  return {
+    exportedAt: new Date().toISOString(),
+    note: '不含原始財產清冊 inventory.json',
+    data
+  };
+}
+
+export function importOperationalJson(payload) {
+  const bundle = payload?.data || payload;
+  if (!bundle || typeof bundle !== 'object') throw new Error('匯入資料格式不正確');
+  for (const [name, key] of Object.entries(STORAGE_KEYS)) {
+    if (bundle[name] !== undefined) writeStore(key, bundle[name]);
+  }
+}
+
+export function clearOperationalData() {
+  writeStore(STORAGE_KEYS.loans, []);
+  writeStore(STORAGE_KEYS.usage, []);
+  writeStore(STORAGE_KEYS.audits, []);
+  writeStore(STORAGE_KEYS.locations, []);
+  writeStore(STORAGE_KEYS.images, {});
+  writeStore(STORAGE_KEYS.activity, []);
+  writeStore(STORAGE_KEYS.overrides, {});
 }

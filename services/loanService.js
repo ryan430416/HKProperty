@@ -26,6 +26,93 @@ export const RETURN_RESULT = {
   LOST: '遺失'
 };
 
+export const ITEM_CONDITION = {
+  NORMAL: '正常',
+  DAMAGED: '有損壞',
+  MISSING_PARTS: '配件缺少',
+  REPAIR: '送修',
+  LOST: '遺失'
+};
+
+const RETURN_ALIASES = {
+  正常: RETURN_RESULT.NORMAL,
+  正常歸還: RETURN_RESULT.NORMAL,
+  有損壞: RETURN_RESULT.DAMAGED,
+  配件缺少: RETURN_RESULT.MISSING_PARTS,
+  送修: RETURN_RESULT.REPAIR,
+  遺失: RETURN_RESULT.LOST
+};
+
+export function normalizeReturnResult(value) {
+  const key = String(value || '').trim();
+  return RETURN_ALIASES[key] || '';
+}
+
+export const CHECKOUT_METHOD = {
+  SELF: 'self_service',
+  ADMIN: 'admin'
+};
+
+export function checkoutMethodLabel(loan) {
+  if (loan?.checkoutMethod === CHECKOUT_METHOD.SELF) return '自助借用';
+  return '管理者辦理';
+}
+
+function addActivity(entry) {
+  const list = readStore(STORAGE_KEYS.activity, []);
+  list.push({
+    id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    createdAt: nowIso(),
+    ...entry
+  });
+  writeStore(STORAGE_KEYS.activity, list);
+}
+
+export function listActivity() {
+  return readStore(STORAGE_KEYS.activity, []).slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+export function assertAvailableForCheckout(propertyId) {
+  const item = getItem(propertyId);
+  if (!item) throw new Error('查無此財產編號');
+  if (item.availabilityStatus === AVAILABILITY.MAINTENANCE) throw new Error('此財產維修中，無法辦理借出');
+  if (item.availabilityStatus === AVAILABILITY.LOST) throw new Error('此財產狀態為異常，無法辦理借出');
+  if (item.availabilityStatus === AVAILABILITY.CHECKED_OUT || item.availabilityStatus === AVAILABILITY.OVERDUE) {
+    throw new Error('此財產目前已借出，不可再次借出');
+  }
+  if (item.availabilityStatus !== AVAILABILITY.AVAILABLE) throw new Error('僅可借用狀態的財產才能辦理借出');
+  if (getOpenLoan(item.propertyId)) throw new Error('此財產已有未歸還的借用紀錄，不可重複借出');
+  return item;
+}
+
+export function verifySelfServiceLoan(code, borrowerId) {
+  const token = String(code || '').trim();
+  const bid = String(borrowerId || '').trim();
+  if (!token) throw new Error('請輸入財產編號或借用編號');
+  if (bid.length < 4) throw new Error('學號或教職員編號至少 4 個字元');
+  const loan = getLoan(token) || getOpenLoan(token) || listLoans(token).find((row) => isOpenLoan(row));
+  if (!loan || loan.borrowerId.trim().toLowerCase() !== bid.toLowerCase()) {
+    throw new Error('查無符合的借用資料');
+  }
+  if (!isOpenLoan(loan)) throw new Error('此筆借用已完成歸還，不可重複歸還');
+  const item = getItem(loan.propertyId);
+  if (!item) throw new Error('查無此財產編號');
+  return { loan, item };
+}
+
+export function lookupSelfServiceLoans(code, borrowerId) {
+  const token = String(code || '').trim().toLowerCase();
+  const bid = String(borrowerId || '').trim().toLowerCase();
+  if (!token) throw new Error('請輸入借用編號或財產編號');
+  if (bid.length < 4) throw new Error('學號或教職員編號至少 4 個字元');
+  const rows = listLoans().filter((loan) => (
+    loan.borrowerId.trim().toLowerCase() === bid
+    && (loan.id.toLowerCase() === token || loan.propertyId.toLowerCase() === token)
+  ));
+  if (!rows.length) throw new Error('查無符合的借用資料');
+  return rows;
+}
+
 function allLoans() {
   return readStore(STORAGE_KEYS.loans, []);
 }
@@ -58,7 +145,7 @@ function nextLoanId(list, at = new Date()) {
     .map((id) => Number(String(id).slice(prefix.length)))
     .filter((num) => Number.isFinite(num));
   const next = (serials.length ? Math.max(...serials) : 0) + 1;
-  return `${prefix}${String(next).padStart(3, '0')}`;
+  return `${prefix}${String(next).padStart(4, '0')}`;
 }
 
 export function listLoans(propertyId) {
@@ -154,24 +241,28 @@ export function getLoanDashboardStats(now = new Date()) {
 }
 
 export function checkout(payload) {
-  const item = getItem(payload.propertyId);
-  if (!item) throw new Error('找不到財產');
-  if (item.availabilityStatus === AVAILABILITY.MAINTENANCE) throw new Error('此財產維修中，無法辦理借出');
-  if (item.availabilityStatus === AVAILABILITY.LOST) throw new Error('此財產狀態為異常，無法辦理借出');
-  if (item.availabilityStatus !== AVAILABILITY.AVAILABLE) throw new Error('僅可借用狀態的財產才能辦理借出');
-  if (getOpenLoan(item.propertyId)) throw new Error('此財產已有未歸還的借用紀錄，不可重複借出');
+  const method = payload.checkoutMethod === CHECKOUT_METHOD.SELF ? CHECKOUT_METHOD.SELF : CHECKOUT_METHOD.ADMIN;
+  const item = assertAvailableForCheckout(payload.propertyId);
 
   const required = [
     ['borrowerName', '請填寫借用人姓名'],
     ['borrowerId', '請填寫學號或教職員編號'],
-    ['borrowerDepartment', '請填寫借用單位或系所'],
+    ['borrowerDepartment', '請填寫借用單位、系所或社團'],
     ['purpose', '請填寫借用用途'],
-    ['checkoutOperator', '請填寫經手人'],
     ['checkedOutAt', '請填寫借出日期與時間'],
     ['expectedReturnAt', '請填寫預計歸還日期與時間']
   ];
+  if (method === CHECKOUT_METHOD.ADMIN) {
+    required.push(['checkoutOperator', '請填寫經手人']);
+  }
   for (const [key, message] of required) {
     if (!String(payload[key] || '').trim()) throw new Error(message);
+  }
+  if (String(payload.borrowerId || '').trim().length < 4) {
+    throw new Error('學號或教職員編號至少 4 個字元');
+  }
+  if (method === CHECKOUT_METHOD.SELF && !payload.borrowerConfirmed) {
+    throw new Error('請勾選借用人確認');
   }
 
   const checkedOutAt = toDate(payload.checkedOutAt);
@@ -180,6 +271,11 @@ export function checkout(payload) {
   if (expectedReturnAt.getTime() < checkedOutAt.getTime()) {
     throw new Error('預計歸還時間不得早於借出時間');
   }
+
+  const operator = method === CHECKOUT_METHOD.SELF
+    ? '自助借用'
+    : (payload.checkoutOperator || '管理者').trim();
+  if (method === CHECKOUT_METHOD.ADMIN && !operator) throw new Error('請填寫經手人');
 
   const list = allLoans();
   const now = new Date();
@@ -194,7 +290,9 @@ export function checkout(payload) {
     checkedOutAt: checkedOutAt.toISOString(),
     expectedReturnAt: expectedReturnAt.toISOString(),
     returnedAt: null,
-    checkoutOperator: payload.checkoutOperator.trim(),
+    checkoutOperator: operator,
+    checkoutMethod: method,
+    contact: (payload.contact || '').trim(),
     returnOperator: '',
     checkoutCondition: (payload.checkoutCondition || '').trim(),
     returnCondition: '',
@@ -225,18 +323,32 @@ export function checkout(payload) {
     currentLoanId: entry.id,
     returnAlert: null
   });
+  addActivity({
+    type: 'checkout',
+    propertyId: item.propertyId,
+    loanId: entry.id,
+    operator,
+    method,
+    summary: `借出 ${item.name}（${item.propertyId}）`
+  });
   return { entry, item: updated };
 }
 
 export function checkin(payload) {
-  const item = getItem(payload.propertyId);
-  if (!item) throw new Error('找不到財產');
-  const loan = getOpenLoan(item.propertyId);
+  const selfService = payload.checkoutMethod === CHECKOUT_METHOD.SELF || payload.selfService === true;
+  let loan = null;
+  if (payload.loanId) loan = getLoan(payload.loanId);
+  if (!loan && payload.propertyId) loan = getOpenLoan(payload.propertyId);
   if (!loan) throw new Error('找不到未歸還的借用紀錄');
-  if (!payload.returnOperator?.trim()) throw new Error('請填寫歸還經手人');
+  if (!isOpenLoan(loan)) throw new Error('此筆借用已完成歸還，不可重複歸還');
+
+  const item = getItem(loan.propertyId);
+  if (!item) throw new Error('找不到財產');
+
+  if (!selfService && !payload.returnOperator?.trim()) throw new Error('請填寫歸還經手人');
   if (!payload.returnedAt) throw new Error('請填寫實際歸還日期與時間');
-  if (!payload.returnResult) throw new Error('請選擇歸還結果');
   if (!payload.returnLocation?.trim()) throw new Error('請填寫歸還後存放地點');
+  if (selfService && !payload.returnConfirmed) throw new Error('請勾選歸還人確認');
 
   const returnedAt = toDate(payload.returnedAt);
   if (!returnedAt) throw new Error('歸還時間格式不正確');
@@ -244,9 +356,11 @@ export function checkin(payload) {
     throw new Error('實際歸還時間不得早於借出時間');
   }
 
-  const result = payload.returnResult;
-  const valid = Object.values(RETURN_RESULT);
-  if (!valid.includes(result)) throw new Error('歸還結果不正確');
+  const result = normalizeReturnResult(payload.returnResult);
+  if (!result) throw new Error('請選擇物品歸還狀況');
+  const needsIssue = result !== RETURN_RESULT.NORMAL;
+  const issueNote = (payload.issueNote || payload.returnCondition || '').trim();
+  if (selfService && needsIssue && !issueNote) throw new Error('請填寫問題說明');
 
   let availabilityStatus = AVAILABILITY.AVAILABLE;
   let returnAlert = null;
@@ -257,11 +371,13 @@ export function checkin(payload) {
 
   const list = allLoans();
   const index = list.findIndex((row) => row.id === loan.id);
+  if (index < 0) throw new Error('找不到未歸還的借用紀錄');
+  const operator = selfService ? '自助歸還' : payload.returnOperator.trim();
   list[index] = {
     ...loan,
     returnedAt: returnedAt.toISOString(),
-    returnOperator: payload.returnOperator.trim(),
-    returnCondition: (payload.returnCondition || '').trim(),
+    returnOperator: operator,
+    returnCondition: issueNote,
     returnResult: result,
     returnLocation: payload.returnLocation.trim(),
     status: LOAN_STATUS.RETURNED,
@@ -277,7 +393,7 @@ export function checkin(payload) {
       propertyId: item.propertyId,
       fromLocation: item.location,
       toLocation: nextLocation,
-      operator: payload.returnOperator.trim(),
+      operator,
       reason: `歸還後更新存放位置（${result}）`
     });
   }
@@ -287,13 +403,21 @@ export function checkin(payload) {
     currentLoanId: null,
     returnAlert
   });
+  addActivity({
+    type: 'checkin',
+    propertyId: item.propertyId,
+    loanId: loan.id,
+    operator,
+    method: selfService ? CHECKOUT_METHOD.SELF : CHECKOUT_METHOD.ADMIN,
+    summary: `歸還 ${item.name}（${item.propertyId}）${result === RETURN_RESULT.NORMAL ? '' : ` · ${result}`}`
+  });
   return { entry: list[index], item: updated, locationChange, returnAlert };
 }
 
 export function exportLoansCsv(rows) {
   const header = [
     '借用編號', '財產名稱', '財產編號', '借用人', '學號或教職員編號', '借用單位',
-    '借出時間', '預計歸還時間', '實際歸還時間', '借用用途', '經手人', '借用狀態', '歸還結果', '備註'
+    '借出時間', '預計歸還時間', '實際歸還時間', '借用用途', '借出方式', '經手人', '借用狀態', '歸還結果', '備註'
   ];
   const lines = [header, ...rows.map((loan) => [
     loan.id,
@@ -306,6 +430,7 @@ export function exportLoansCsv(rows) {
     loan.expectedReturnAt,
     loan.returnedAt || '',
     loan.purpose,
+    checkoutMethodLabel(loan),
     loan.returnOperator || loan.checkoutOperator,
     displayLoanStatus(loan),
     loan.returnResult || '',
