@@ -732,10 +732,55 @@ form, #historyBody, #detailBody { padding: 12px 18px 18px; }
   border-top: 1px solid var(--line);
 }
 .ss-sticky button, .ss-inline-actions button { flex: 1 1 140px; min-width: 0; }
-.ss-preview {
-  margin-top: 16px;
+.ss-browse-filters {
   display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
   gap: 12px;
+  margin: 12px 0 8px;
+}
+.ss-available-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+  max-height: min(58vh, 560px);
+  overflow: auto;
+  padding-right: 2px;
+}
+.ss-available-item {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+  cursor: pointer;
+}
+.ss-available-item:hover {
+  border-color: var(--navy-mid);
+  background: var(--navy-soft);
+}
+.ss-available-item img {
+  width: 72px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--navy-soft);
+}
+.ss-available-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.ss-available-body strong {
+  font-size: 15px;
+  color: var(--text);
+}
+.ss-available-body .badge {
+  justify-self: start;
 }
 .ss-preview-card {
   display: grid;
@@ -777,6 +822,7 @@ form, #historyBody, #detailBody { padding: 12px 18px 18px; }
 
 @media (max-width: 860px) {
   .kiosk-grid, .ss-cards { grid-template-columns: 1fr; }
+  .ss-browse-filters { grid-template-columns: 1fr; }
   .ss-preview-card { grid-template-columns: 1fr; }
   .ss-steps { grid-template-columns: 1fr; }
   .settings-actions { flex-direction: column; }

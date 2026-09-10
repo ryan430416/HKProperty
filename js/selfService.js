@@ -1,4 +1,4 @@
-import { AVAILABILITY, getItem } from '../services/inventoryService.js';
+import { AVAILABILITY, getItem, listItems } from '../services/inventoryService.js';
 import {
   CHECKOUT_METHOD,
   checkin,
@@ -11,10 +11,11 @@ import {
   verifySelfServiceLoan
 } from '../services/loanService.js';
 import { displayValue, esc, formatDateTime, toInputDateTime } from './format.js';
-import { parseScanPayload } from './scanner.js';
 import { getProfile } from '../services/authService.js';
+import { toast } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
+const PAGE_SIZE = 24;
 
 const state = {
   mode: 'home',
@@ -24,7 +25,9 @@ const state = {
   loan: null,
   lastLoanId: '',
   lastBorrowerId: '',
-  submitting: false
+  submitting: false,
+  availableLimit: PAGE_SIZE,
+  availableMatches: []
 };
 
 let onChanged = () => {};
@@ -92,8 +95,10 @@ export function openSelfMode(mode) {
     if (state.borrowStep >= 4) {
       state.borrowStep = 1;
       state.item = null;
-      $('ssBorrowPreview').hidden = true;
-      show($('ssBorrowStep1Actions'), false);
+    }
+    if ((state.borrowStep || 1) === 1) {
+      state.availableLimit = PAGE_SIZE;
+      renderAvailableBorrowList();
     }
     setBorrowStep(state.borrowStep || 1);
   }
@@ -113,7 +118,9 @@ export function openSelfMode(mode) {
 }
 
 function canStartBorrow(item) {
-  if (!item) return { ok: false, message: '查無此財產編號' };
+  if (!item) return { ok: false, message: '找不到可借用物品' };
+  if (item.isActive === false) return { ok: false, message: '此財產已停用' };
+  if (item.isBorrowable === false) return { ok: false, message: '此財產不可借用' };
   if (item.availabilityStatus === AVAILABILITY.AVAILABLE) return { ok: true, message: '' };
   if (item.availabilityStatus === AVAILABILITY.MAINTENANCE) return { ok: false, message: '此財產維修中，無法辦理借出' };
   if (item.availabilityStatus === AVAILABILITY.LOST) return { ok: false, message: '此財產狀態為異常，無法辦理借出' };
@@ -124,46 +131,78 @@ function canStartBorrow(item) {
   return { ok: false, message: '僅可借用狀態的財產才能辦理借出' };
 }
 
-function renderBorrowPreview(item) {
-  const box = $('ssBorrowPreview');
-  const check = canStartBorrow(item);
-  box.hidden = false;
-  box.innerHTML = `
-    <div class="ss-preview-card">
-      <img src="${esc(item.image)}" alt="${esc(item.name)}">
-      <div>
-        <h3>${esc(item.name)}</h3>
-        <div class="pid">${esc(item.propertyId)}</div>
-        <div>目前位置：${esc(displayValue(item.location))}</div>
-        <div>借用狀態：<span class="badge ${item.availabilityStatus === AVAILABILITY.AVAILABLE ? 'ok' : 'alert'}">${esc(item.availabilityLabel)}</span></div>
-        ${check.ok ? '' : `<p class="field-error">${esc(check.message)}</p>`}
-      </div>
-    </div>
-  `;
-  show($('ssBorrowStep1Actions'), check.ok);
-  $('ssBorrowStartBtn').disabled = !check.ok;
+function listAvailableForBorrow() {
+  return listItems()
+    .filter((item) => item.isActive !== false && item.isBorrowable !== false && item.availabilityStatus === AVAILABILITY.AVAILABLE)
+    .sort((a, b) => {
+      const byName = String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant');
+      if (byName) return byName;
+      return String(a.propertyId || '').localeCompare(String(b.propertyId || ''), 'zh-Hant');
+    });
 }
 
-function lookupBorrowItem(raw) {
-  clearErrors(['ssBorrowCodeError']);
-  const code = parseScanPayload(raw);
-  $('ssBorrowCode').value = code;
-  if (!code) {
-    setError('ssBorrowCodeError', '請輸入財產編號');
-    toast('請輸入財產編號', 'error');
-    return;
+function filteredAvailableItems() {
+  const q = String($('ssBorrowSearch')?.value || '').trim().toLowerCase();
+  const location = String($('ssBorrowLocation')?.value || '').trim();
+  return listAvailableForBorrow().filter((item) => {
+    if (location && item.location !== location) return false;
+    if (!q) return true;
+    const hay = `${item.name || ''} ${item.location || ''} ${item.propertyId || ''}`.toLowerCase();
+    return hay.includes(q);
+  });
+}
+
+function fillBorrowLocationOptions(items) {
+  const select = $('ssBorrowLocation');
+  if (!select) return;
+  const current = select.value;
+  const locations = [...new Set(items.map((item) => item.location).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+  select.innerHTML = `<option value="">全部地點</option>${locations.map((loc) => (
+    `<option value="${esc(loc)}">${esc(loc)}</option>`
+  )).join('')}`;
+  if (locations.includes(current)) select.value = current;
+}
+
+function renderAvailableBorrowList() {
+  const list = $('ssBorrowAvailableList');
+  const meta = $('ssBorrowListMeta');
+  const moreBtn = $('ssBorrowMoreBtn');
+  if (!list || !meta) return;
+  const allAvailable = listAvailableForBorrow();
+  fillBorrowLocationOptions(allAvailable);
+  state.availableMatches = filteredAvailableItems();
+  const visible = state.availableMatches.slice(0, state.availableLimit);
+  meta.textContent = state.availableMatches.length
+    ? `目前可借用 ${state.availableMatches.length} 件${visible.length < state.availableMatches.length ? `，先顯示 ${visible.length} 件` : ''}`
+    : '目前沒有符合條件的可借用物品';
+  list.innerHTML = visible.length
+    ? visible.map((item) => `
+      <button type="button" class="ss-available-item" role="listitem" data-borrow-pick="${esc(item.propertyId)}">
+        <img src="${esc(item.image)}" alt="">
+        <span class="ss-available-body">
+          <strong>${esc(item.name)}</strong>
+          <span class="muted">${esc(displayValue(item.location))}</span>
+          <span class="badge ok">可借用</span>
+        </span>
+      </button>
+    `).join('')
+    : `<div class="empty">請調整搜尋條件，或稍後再試</div>`;
+  if (moreBtn) {
+    moreBtn.hidden = visible.length >= state.availableMatches.length;
   }
-  const item = getItem(code);
-  if (!item) {
-    state.item = null;
-    $('ssBorrowPreview').hidden = false;
-    $('ssBorrowPreview').innerHTML = `<p class="field-error">查無此財產編號</p>`;
-    show($('ssBorrowStep1Actions'), false);
-    toast('查無此財產編號', 'error');
+}
+
+function selectBorrowItem(propertyId) {
+  const item = getItem(propertyId);
+  const check = canStartBorrow(item);
+  if (!check.ok) {
+    toast(check.message, 'error');
+    renderAvailableBorrowList();
     return;
   }
   state.item = item;
-  renderBorrowPreview(item);
+  fillBorrowDefaults();
+  setBorrowStep(2);
 }
 
 function readBorrowForm() {
@@ -201,7 +240,7 @@ function validateBorrowForm(data) {
 }
 
 function fillBorrowDefaults() {
-  $('ssBorrowFormHint').textContent = `${state.item.name} · ${state.item.propertyId}`;
+  $('ssBorrowFormHint').textContent = `${state.item.name} · ${displayValue(state.item.location)}`;
   const profile = getProfile();
   if (profile) {
     if (!$('ssBorrowerName').value) $('ssBorrowerName').value = profile.display_name || '';
@@ -373,29 +412,28 @@ async function startReturnFromLoan(code, borrowerId) {
 export function bindSelfService(handlers = {}) {
   onChanged = handlers.onChanged || onChanged;
 
-  $('ssBorrowLookupBtn').addEventListener('click', () => lookupBorrowItem($('ssBorrowCode').value));
-  $('ssBorrowScanBtn').addEventListener('click', () => {
-    show($('ssScanBox'), true);
-    $('ssScanCode').focus();
+  $('ssBorrowBackToItem').addEventListener('click', () => {
+    state.availableLimit = PAGE_SIZE;
+    setBorrowStep(1);
+    renderAvailableBorrowList();
   });
-  $('ssScanLookupBtn').addEventListener('click', () => lookupBorrowItem($('ssScanCode').value));
-  $('ssBorrowCode').addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      lookupBorrowItem($('ssBorrowCode').value);
-    }
+  $('ssBorrowSearch')?.addEventListener('input', () => {
+    state.availableLimit = PAGE_SIZE;
+    renderAvailableBorrowList();
   });
-  $('ssBorrowStartBtn').addEventListener('click', () => {
-    if (!state.item) return;
-    const check = canStartBorrow(state.item);
-    if (!check.ok) {
-      toast(check.message, 'error');
-      return;
-    }
-    fillBorrowDefaults();
-    setBorrowStep(2);
+  $('ssBorrowLocation')?.addEventListener('change', () => {
+    state.availableLimit = PAGE_SIZE;
+    renderAvailableBorrowList();
   });
-  $('ssBorrowBackToItem').addEventListener('click', () => setBorrowStep(1));
+  $('ssBorrowMoreBtn')?.addEventListener('click', () => {
+    state.availableLimit += PAGE_SIZE;
+    renderAvailableBorrowList();
+  });
+  $('ssBorrowAvailableList')?.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-borrow-pick]');
+    if (!btn) return;
+    selectBorrowItem(btn.dataset.borrowPick);
+  });
   $('ssBorrowForm').addEventListener('submit', (event) => {
     event.preventDefault();
     clearErrors([

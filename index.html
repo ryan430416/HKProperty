@@ -127,7 +127,7 @@
           <div class="kiosk-grid" aria-label="自助借還入口">
             <button type="button" class="kiosk-btn" data-self="borrow">
               <strong>自助借出</strong>
-              <span>自行尋找財產並填寫借用資料</span>
+              <span>從目前可借用的物品中挑選並填寫資料</span>
             </button>
             <button type="button" class="kiosk-btn" data-self="return">
               <strong>自助歸還</strong>
@@ -166,7 +166,7 @@
               <button type="button" class="ss-card" data-self="borrow">
                 <span class="ss-card-num">1</span>
                 <strong>我要借用</strong>
-                <span>尋找財產並自行填寫借用資料</span>
+                <span>瀏覽目前可借用的物品並填寫資料</span>
               </button>
               <button type="button" class="ss-card" data-self="return">
                 <span class="ss-card-num">2</span>
@@ -188,28 +188,25 @@
               <li data-ss-step="3">確認完成</li>
             </ol>
             <div id="ssBorrowStep1" class="panel ss-panel">
-              <h2>尋找要借用的財產</h2>
-              <div class="field">
-                <label for="ssBorrowCode">財產編號 <span class="req">必填</span></label>
-                <input id="ssBorrowCode" inputmode="numeric" autocomplete="off" placeholder="請輸入財產編號" />
-                <p class="field-error" id="ssBorrowCodeError"></p>
-              </div>
-              <div class="ss-inline-actions">
-                <button type="button" class="secondary" id="ssBorrowScanBtn">掃描 QR Code</button>
-                <button type="button" class="primary" id="ssBorrowLookupBtn">查找財產</button>
-              </div>
-              <div id="ssScanBox" class="ss-scan-box" hidden>
-                <p class="muted">相機掃描功能已預留，目前請改以手動輸入財產編號。</p>
+              <h2>選擇要借用的物品</h2>
+              <p class="muted">以下只顯示目前可借用的物品。可用名稱或存放地點搜尋，點選後即可填寫借用資料。</p>
+              <div class="ss-browse-filters">
                 <div class="field">
-                  <label for="ssScanCode">掃描或輸入財產編號</label>
-                  <input id="ssScanCode" autocomplete="off" placeholder="例如 820091001" />
+                  <label for="ssBorrowSearch">搜尋物品名稱或地點</label>
+                  <input id="ssBorrowSearch" type="search" autocomplete="off" placeholder="例如：鋼琴、H11400" />
                 </div>
-                <button type="button" class="primary" id="ssScanLookupBtn">以掃描編號查找</button>
+                <div class="field">
+                  <label for="ssBorrowLocation">存放地點</label>
+                  <select id="ssBorrowLocation">
+                    <option value="">全部地點</option>
+                  </select>
+                </div>
               </div>
-              <div id="ssBorrowPreview" class="ss-preview" hidden></div>
-              <div class="ss-sticky" id="ssBorrowStep1Actions" hidden>
+              <p class="muted" id="ssBorrowListMeta">載入中…</p>
+              <div id="ssBorrowAvailableList" class="ss-available-list" role="list"></div>
+              <div class="ss-sticky" id="ssBorrowStep1Actions">
                 <button type="button" class="secondary" data-self="home">返回</button>
-                <button type="button" class="primary" id="ssBorrowStartBtn">開始填寫借用資料</button>
+                <button type="button" class="ghost-btn" id="ssBorrowMoreBtn" hidden>顯示更多</button>
               </div>
             </div>
             <form id="ssBorrowForm" class="panel ss-panel" hidden>
