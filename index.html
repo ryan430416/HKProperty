@@ -2,120 +2,401 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="theme-color" content="#132c25" />
-  <title>校園財產盤點系統</title>
-  <meta name="description" content="依物品類別查詢校園財產，每件物品皆有獨立財產編號。" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#173a63" />
+  <title>弘光科技大學全校財產盤點系統</title>
+  <meta name="description" content="弘光科技大學全校財產盤點系統雛形，提供財產查詢、使用登記與盤點作業。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <aside class="sidebar">
-    <div class="brand"><span class="brand-mark">校</span><div><strong>校園盤點</strong><small>ASSET TRACKER</small></div></div>
-    <nav>
-      <button class="nav-item active" data-view="all"><span>▦</span>財產總覽</button>
-      <button class="nav-item" data-view="logs"><span>☰</span>使用紀錄</button>
-      <button class="nav-item" data-view="loaned"><span>↗</span>目前外借</button>
-      <button class="nav-item" data-view="frequent"><span>✦</span>高頻使用</button>
-      <button class="nav-item" data-view="attention"><span>!</span>待確認物品</button>
-    </nav>
-    <div class="side-cats">
-      <small>物品類別</small>
-      <div id="sideCategories"></div>
-    </div>
-    <div class="side-note"><small>本次盤點進度</small><div><strong id="progressText">75%</strong><span id="progressCount">6 / 8 件</span></div><div class="progress"><i id="progressBar"></i></div></div>
-  </aside>
-
-  <main>
-    <header>
-      <button class="menu" aria-label="開啟選單">☰</button>
-      <div><p class="eyebrow">全校財產管理</p><h1>財產盤點總覽</h1></div>
-      <button class="primary" id="addBtn">＋ 新增物品</button>
-    </header>
-
-    <section class="stats" aria-label="財產統計">
-      <article><span class="stat-icon green">▦</span><div><small>財產總數</small><strong id="totalCount">0</strong><em>件</em></div></article>
-      <article><span class="stat-icon teal">▣</span><div><small>物品類別</small><strong id="categoryCount">0</strong><em>類</em></div></article>
-      <article><span class="stat-icon orange">↗</span><div><small>目前外借</small><strong id="loanedCount">0</strong><em>件</em></div></article>
-      <article><span class="stat-icon blue">☰</span><div><small>本月借出</small><strong id="monthUses">0</strong><em>次</em></div></article>
-      <article><span class="stat-icon red">!</span><div><small>待確認</small><strong id="attentionCount">0</strong><em>件</em></div></article>
-    </section>
-
-    <section class="toolbar">
-      <label class="search"><span>⌕</span><input id="search" placeholder="搜尋物品、財產編號、使用人或借出人…" /></label>
-      <select id="categoryFilter" aria-label="依類別篩選"><option value="">全部類別</option></select>
-      <select id="locationFilter" aria-label="依位置篩選"><option value="">全部位置</option></select>
-      <select id="sortBy" aria-label="排序">
-        <option value="category">依類別分組</option>
-        <option value="code">財產編號</option>
-        <option value="uses">使用次數最多</option>
-        <option value="name">物品名稱</option>
-      </select>
-    </section>
-
-    <div class="chips" id="categoryChips" aria-label="快速篩選類別"></div>
-
-    <div class="section-head">
-      <div><h2>物品清單</h2><p id="resultText">依類別檢視</p></div>
-      <div class="view-toggle">
-        <button class="active" data-layout="grid" aria-label="卡片檢視">▦</button>
-        <button data-layout="list" aria-label="列表檢視">☷</button>
+  <a class="skip-link" href="#main">跳到主要內容</a>
+  <div class="app">
+    <aside class="sidebar" id="sidebar" aria-label="主要導覽">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">弘</span>
+        <div>
+          <strong>弘光科技大學</strong>
+          <small>全校財產盤點系統</small>
+        </div>
       </div>
-    </div>
-    <section class="asset-board" id="assetBoard"></section>
-  </main>
+      <nav class="side-nav">
+        <button type="button" class="nav-item active" data-view="dashboard">系統總覽</button>
+        <button type="button" class="nav-item" data-view="inventory">財產清冊</button>
+        <button type="button" class="nav-item" data-view="audit">盤點作業</button>
+        <button type="button" class="nav-item" data-view="usage">使用紀錄</button>
+        <button type="button" class="nav-item" data-view="locations">位置管理</button>
+        <button type="button" class="nav-item" data-view="settings">系統設定</button>
+      </nav>
+      <button type="button" class="scan-btn" id="scanBtn">掃描財產 QR Code</button>
+      <p class="side-foot">本機雛形 · 資料保存在此瀏覽器</p>
+    </aside>
 
-  <dialog id="editDialog">
-    <form method="dialog" id="editForm">
-      <div class="dialog-head"><div><p class="eyebrow">快速盤點</p><h2 id="dialogTitle">更新財產</h2></div><button value="cancel" class="icon-btn" aria-label="關閉">×</button></div>
-      <input type="hidden" id="editId" />
-      <label>物品類別<input id="editCategory" list="categoryList" placeholder="例如：筆記型電腦" required /></label>
-      <datalist id="categoryList"></datalist>
-      <label>物品名稱<input id="editName" required /></label>
-      <label>財產編號<input id="editCode" placeholder="每件物品各自獨立" required /></label>
-      <label>目前位置<input id="editLocation" required /></label>
-      <label>物品圖片網址<input id="editImage" placeholder="https://…" /></label>
-      <div class="dialog-actions"><button value="cancel" class="secondary">取消</button><button value="default" class="primary">儲存資料</button></div>
-    </form>
-  </dialog>
-  <dialog id="logDialog" class="wide">
-    <div class="dialog-head">
-      <div><p class="eyebrow">借入借出時間軸</p><h2 id="logTitle">使用紀錄</h2></div>
-      <button class="icon-btn" data-close="logDialog" aria-label="關閉">×</button>
+    <div class="shell">
+      <header class="topbar">
+        <button type="button" class="icon-btn menu-btn" id="menuBtn" aria-label="開啟選單" aria-controls="sidebar">
+          <span></span><span></span><span></span>
+        </button>
+        <div class="topbar-title">
+          <p class="eyebrow" id="pageEyebrow">弘光科技大學</p>
+          <h1 id="pageTitle">系統總覽</h1>
+        </div>
+        <form class="global-search" id="globalSearchForm" role="search">
+          <label class="sr-only" for="globalSearch">全站搜尋</label>
+          <input id="globalSearch" name="q" type="search" placeholder="搜尋財產編號、名稱、地點、保管人…" />
+          <button type="submit" class="ghost-btn">搜尋</button>
+        </form>
+        <button type="button" class="icon-btn scan-icon" id="scanBtnMobile" aria-label="掃描財產 QR Code">QR</button>
+        <div class="notify-wrap">
+          <button type="button" class="icon-btn" id="notifyBtn" aria-label="通知" aria-expanded="false" aria-controls="notifyPanel">
+            <span class="bell" aria-hidden="true"></span>
+            <span class="notify-dot" id="notifyDot" hidden></span>
+          </button>
+          <div class="notify-panel" id="notifyPanel" hidden>
+            <h2>通知</h2>
+            <div id="notifyList"></div>
+          </div>
+        </div>
+        <div class="admin">
+          <span class="avatar" aria-hidden="true">管</span>
+          <span>管理者</span>
+        </div>
+      </header>
+
+      <main id="main">
+        <div id="loading" class="loading" hidden>
+          <div class="spinner" aria-hidden="true"></div>
+          <p>資料載入中…</p>
+        </div>
+
+        <section class="view" id="view-dashboard" aria-label="系統總覽">
+          <div class="stat-grid" id="statGrid"></div>
+          <div class="dash-grid">
+            <article class="panel">
+              <h2>各存放地點財產數量</h2>
+              <div id="locationRank"></div>
+            </article>
+            <article class="panel">
+              <h2>最近盤點紀錄</h2>
+              <div id="recentAudits"></div>
+            </article>
+            <article class="panel">
+              <h2>最近使用紀錄</h2>
+              <div id="recentUsage"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" id="view-inventory" hidden aria-label="財產清冊">
+          <form class="filters" id="filterForm">
+            <div class="field grow">
+              <label for="filterQuery">搜尋</label>
+              <input id="filterQuery" type="search" placeholder="財產編號、名稱、地點、保管人、保管單位、規格" />
+            </div>
+            <div class="field">
+              <label for="filterLocation">存放地點</label>
+              <select id="filterLocation"></select>
+            </div>
+            <div class="field">
+              <label for="filterStatus">財產狀態</label>
+              <select id="filterStatus"></select>
+            </div>
+            <div class="field">
+              <label for="filterAudit">盤點狀態</label>
+              <select id="filterAudit"></select>
+            </div>
+            <div class="field">
+              <label for="filterDept">保管單位</label>
+              <select id="filterDept"></select>
+            </div>
+            <div class="field">
+              <label for="filterSort">排序</label>
+              <select id="filterSort">
+                <option value="propertyId">財產編號</option>
+                <option value="name">財產名稱</option>
+                <option value="useCount">使用次數</option>
+                <option value="lastAuditAt">最近盤點時間</option>
+              </select>
+            </div>
+            <div class="field field-action">
+              <button type="button" class="secondary" id="clearFilters">清除篩選</button>
+            </div>
+          </form>
+          <div class="table-wrap" id="inventoryTableWrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">圖片</th>
+                  <th scope="col">財產名稱</th>
+                  <th scope="col">財產編號</th>
+                  <th scope="col">目前位置</th>
+                  <th scope="col">保管單位</th>
+                  <th scope="col">保管人</th>
+                  <th scope="col">使用次數</th>
+                  <th scope="col">財產狀態</th>
+                  <th scope="col">盤點狀態</th>
+                  <th scope="col">操作</th>
+                </tr>
+              </thead>
+              <tbody id="inventoryBody"></tbody>
+            </table>
+          </div>
+          <div class="card-list" id="inventoryCards"></div>
+          <div class="pager" id="inventoryPager"></div>
+        </section>
+
+        <section class="view" id="view-audit" hidden aria-label="盤點作業">
+          <div class="panel intro-panel">
+            <div>
+              <h2>盤點作業</h2>
+              <p id="auditSummary">載入盤點進度中</p>
+            </div>
+            <div class="progress-track" aria-hidden="true"><i id="auditProgressBar"></i></div>
+          </div>
+          <div id="auditList"></div>
+          <div class="pager" id="auditPager"></div>
+        </section>
+
+        <section class="view" id="view-usage" hidden aria-label="使用紀錄">
+          <div class="panel">
+            <h2>使用紀錄</h2>
+            <div id="usageList"></div>
+          </div>
+          <div class="pager" id="usagePager"></div>
+        </section>
+
+        <section class="view" id="view-locations" hidden aria-label="位置管理">
+          <div class="panel">
+            <h2>位置管理</h2>
+            <p class="muted">依目前登記位置彙整財產數量。點選地點可前往財產清冊篩選。</p>
+            <div id="locationManage"></div>
+          </div>
+        </section>
+
+        <section class="view" id="view-settings" hidden aria-label="系統設定">
+          <div class="panel coming-soon">
+            <h2>系統設定</h2>
+            <p>此功能開發中。未來將提供帳號權限、盤點年度與資料同步設定。</p>
+          </div>
+        </section>
+      </main>
     </div>
-    <p class="log-meta" id="logMeta"></p>
-    <div class="log-actions">
-      <button class="primary" id="logBorrowBtn">登記借出</button>
-      <button class="secondary" id="logReturnBtn">登記歸還</button>
+  </div>
+
+  <div class="backdrop" id="sidebarBackdrop" hidden></div>
+
+  <dialog id="detailDialog" class="drawer">
+    <div class="drawer-head">
+      <div>
+        <p class="eyebrow">財產詳細資料</p>
+        <h2 id="detailTitle">財產</h2>
+      </div>
+      <button type="button" class="icon-btn" data-close="detailDialog" aria-label="關閉">×</button>
     </div>
-    <ol class="timeline" id="timeline"></ol>
+    <div id="detailBody"></div>
   </dialog>
 
-  <dialog id="loanDialog">
-    <form id="loanForm">
+  <dialog id="usageDialog">
+    <form id="usageForm">
       <div class="dialog-head">
-        <div><p class="eyebrow" id="loanEyebrow">使用紀錄</p><h2 id="loanTitle">登記借出</h2></div>
-        <button type="button" class="icon-btn" data-close="loanDialog" aria-label="關閉">×</button>
+        <div>
+          <p class="eyebrow" id="usageEyebrow">登記使用</p>
+          <h2>登記使用</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close="usageDialog" aria-label="關閉">×</button>
       </div>
-      <input type="hidden" id="loanAssetId" />
-      <input type="hidden" id="loanMode" />
-      <p class="log-meta" id="loanSummary"></p>
-      <div id="loanBorrowFields">
-        <label>使用人<input id="loanBorrower" list="peopleList" placeholder="實際使用／借入者" required /></label>
-        <label>借出人<input id="loanLender" list="peopleList" placeholder="經手借出的管理人" required /></label>
-        <label>借出時間<input type="datetime-local" id="loanBorrowedAt" required /></label>
+      <input type="hidden" id="usagePropertyId" />
+      <div class="field">
+        <label for="usageUser">使用人</label>
+        <input id="usageUser" required maxlength="40" autocomplete="name" />
       </div>
-      <div id="loanReturnFields" hidden>
-        <label>歸還時間<input type="datetime-local" id="loanReturnedAt" /></label>
+      <div class="field">
+        <label for="usageDept">使用單位</label>
+        <input id="usageDept" required maxlength="60" />
       </div>
-      <datalist id="peopleList"></datalist>
+      <div class="field">
+        <label for="usageAt">使用日期與時間</label>
+        <input id="usageAt" type="datetime-local" required />
+      </div>
+      <div class="field">
+        <label for="usagePurpose">使用用途</label>
+        <input id="usagePurpose" required maxlength="80" />
+      </div>
+      <div class="field">
+        <label for="usageNote">備註</label>
+        <textarea id="usageNote" rows="3" maxlength="200"></textarea>
+      </div>
       <div class="dialog-actions">
-        <button type="button" class="secondary" data-close="loanDialog">取消</button>
-        <button class="primary" id="loanSubmit">確認</button>
+        <button type="button" class="secondary" data-close="usageDialog">取消</button>
+        <button type="submit" class="primary">儲存紀錄</button>
       </div>
     </form>
   </dialog>
 
-  <div class="toast" id="toast" role="status"></div>
-  <script src="app.js"></script>
+  <dialog id="auditDialog">
+    <form id="auditForm">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow" id="auditEyebrow">執行盤點</p>
+          <h2>執行盤點</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close="auditDialog" aria-label="關閉">×</button>
+      </div>
+      <input type="hidden" id="auditPropertyId" />
+      <div class="field">
+        <label for="auditRegistered">系統登記位置</label>
+        <input id="auditRegistered" readonly />
+      </div>
+      <div class="field">
+        <label for="auditActual">本次實際位置</label>
+        <input id="auditActual" required maxlength="40" />
+      </div>
+      <fieldset class="field">
+        <legend>盤點結果</legend>
+        <label class="choice"><input type="radio" name="auditResult" value="位置正確" required /> 位置正確</label>
+        <label class="choice"><input type="radio" name="auditResult" value="位置異常" /> 位置異常</label>
+        <label class="choice"><input type="radio" name="auditResult" value="找不到物品" /> 找不到物品</label>
+        <label class="choice"><input type="radio" name="auditResult" value="物品損壞" /> 物品損壞</label>
+      </fieldset>
+      <div class="field">
+        <label for="auditPerson">盤點人</label>
+        <input id="auditPerson" required maxlength="40" />
+      </div>
+      <div class="field">
+        <label for="auditAt">盤點時間</label>
+        <input id="auditAt" type="datetime-local" required />
+      </div>
+      <div class="field">
+        <label for="auditNote">備註</label>
+        <textarea id="auditNote" rows="3" maxlength="200"></textarea>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="secondary" data-close="auditDialog">取消</button>
+        <button type="submit" class="primary">儲存盤點</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="locationDialog">
+    <form id="locationForm">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow" id="locationEyebrow">更新位置</p>
+          <h2>更新位置</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close="locationDialog" aria-label="關閉">×</button>
+      </div>
+      <input type="hidden" id="locationPropertyId" />
+      <div class="field">
+        <label for="locationCurrent">目前位置</label>
+        <input id="locationCurrent" readonly />
+      </div>
+      <div class="field">
+        <label for="locationNext">新的存放位置</label>
+        <input id="locationNext" required maxlength="40" />
+      </div>
+      <div class="field">
+        <label for="locationOperator">異動人員</label>
+        <input id="locationOperator" required maxlength="40" value="管理者" />
+      </div>
+      <div class="field">
+        <label for="locationReason">異動原因</label>
+        <input id="locationReason" required maxlength="80" />
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="secondary" data-close="locationDialog">取消</button>
+        <button type="submit" class="primary">確認更新</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="imageDialog">
+    <form id="imageForm">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow" id="imageEyebrow">上傳圖片</p>
+          <h2>上傳物品圖片</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close="imageDialog" aria-label="關閉">×</button>
+      </div>
+      <input type="hidden" id="imagePropertyId" />
+      <p class="muted">僅支援 JPG、PNG、WebP，檔案請小於 1.5 MB。手機可直接拍照上傳。</p>
+      <div class="image-preview" id="imagePreviewBox">
+        <img id="imagePreview" alt="圖片預覽" />
+      </div>
+      <div class="field">
+        <label for="imageFile">選擇圖片或拍照</label>
+        <input id="imageFile" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" />
+      </div>
+      <p class="form-error" id="imageError" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" class="secondary" data-close="imageDialog">取消</button>
+        <button type="submit" class="primary" id="imageSaveBtn" disabled>儲存圖片</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="historyDialog" class="wide">
+    <div class="dialog-head">
+      <div>
+        <p class="eyebrow" id="historyEyebrow">財產紀錄</p>
+        <h2>查看紀錄</h2>
+      </div>
+      <button type="button" class="icon-btn" data-close="historyDialog" aria-label="關閉">×</button>
+    </div>
+    <div class="tabs" role="tablist">
+      <button type="button" class="tab active" data-history-tab="usage">使用紀錄</button>
+      <button type="button" class="tab" data-history-tab="audit">盤點紀錄</button>
+      <button type="button" class="tab" data-history-tab="location">位置異動</button>
+    </div>
+    <div id="historyBody"></div>
+  </dialog>
+
+  <dialog id="scanDialog">
+    <form id="scanForm">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">掃描入口</p>
+          <h2>掃描財產 QR Code</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close="scanDialog" aria-label="關閉">×</button>
+      </div>
+      <p class="muted">相機掃描功能已預留接點，目前請改以手動輸入財產編號查找。</p>
+      <div class="field">
+        <label for="scanCode">財產編號</label>
+        <input id="scanCode" required placeholder="例如 820091001" autocomplete="off" />
+      </div>
+      <p class="form-error" id="scanError" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" class="secondary" id="cameraScanBtn">啟用相機掃描</button>
+        <button type="submit" class="primary">查找財產</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="confirmDialog">
+    <form id="confirmForm">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">位置確認</p>
+          <h2>是否更新位置？</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close="confirmDialog" aria-label="關閉">×</button>
+      </div>
+      <p id="confirmText"></p>
+      <input type="hidden" id="confirmPropertyId" />
+      <input type="hidden" id="confirmFrom" />
+      <input type="hidden" id="confirmTo" />
+      <div class="dialog-actions">
+        <button type="button" class="secondary" id="confirmKeep">維持原位置</button>
+        <button type="submit" class="primary">確認更新位置</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>
