@@ -10,11 +10,13 @@ import {
   formatDateTime,
   formatPrice,
   toInputDateTime,
-  auditStatusClass
+  auditStatusClass,
+  availabilityClass
 } from './format.js';
 import { closeDialog, fillSelect, openDialog, setLoading, toast } from './ui.js';
 import { parseScanPayload, startCameraScan } from './scanner.js';
 import {
+  AVAILABILITY,
   findByPropertyId,
   getFilterOptions,
   getItem,
@@ -24,12 +26,32 @@ import {
   locationRanking,
   saveImage
 } from '../services/inventoryService.js';
-import { addUsage, listUsage, monthUsageCount } from '../services/usageService.js';
+import { addUsage, listUsage } from '../services/usageService.js';
 import { addAudit, confirmLocationUpdate, listAudits, listLocationChanges } from '../services/auditService.js';
+import {
+  RETURN_RESULT,
+  checkin,
+  checkout,
+  currentLoanOf,
+  displayLoanStatus,
+  exportLoansCsv,
+  getLoan,
+  getLoanDashboardStats,
+  getOpenLoan,
+  isDueToday,
+  isDueWithinHours,
+  isLoanOverdue,
+  isOpenLoan,
+  listLoans,
+  overdueDuration,
+  refreshOverdueStatus
+} from '../services/loanService.js';
 
 const PAGE_META = {
   dashboard: ['財產管理', '系統總覽'],
   inventory: ['財產查詢', '財產清冊'],
+  loans: ['借用作業', '借出管理'],
+  loanHistory: ['借用作業', '借用紀錄'],
   audit: ['盤點作業', '盤點作業'],
   usage: ['使用管理', '使用紀錄'],
   locations: ['位置資料', '位置管理'],
@@ -41,13 +63,20 @@ const state = {
   page: 1,
   auditPage: 1,
   usagePage: 1,
+  loanPage: 1,
+  loanHistoryPage: 1,
   historyTab: 'usage',
   historyId: '',
-  pendingImage: ''
+  pendingImage: '',
+  pendingCheckout: null
 };
 
 function $(id) {
   return document.getElementById(id);
+}
+
+function imageOf(item) {
+  return item?.image || PLACEHOLDER_IMAGE;
 }
 
 function currentFilters() {
@@ -56,6 +85,7 @@ function currentFilters() {
     location: $('filterLocation').value,
     status: $('filterStatus').value,
     auditStatus: $('filterAudit').value,
+    availability: $('filterAvailability').value,
     department: $('filterDept').value,
     sort: $('filterSort').value
   };
@@ -75,6 +105,7 @@ function matchesFilters(item, filters) {
     && (!filters.location || item.location === filters.location)
     && (!filters.status || item.status === filters.status)
     && (!filters.auditStatus || item.auditStatus === filters.auditStatus)
+    && (!filters.availability || item.availabilityStatus === filters.availability)
     && (!filters.department || item.department === filters.department);
 }
 
@@ -89,8 +120,8 @@ function sortItems(list, sort) {
   return copy;
 }
 
-function filteredItems(extra = {}) {
-  const filters = { ...currentFilters(), ...extra };
+function filteredItems() {
+  const filters = currentFilters();
   return sortItems(listItems().filter((item) => matchesFilters(item, filters)), filters.sort);
 }
 
@@ -126,11 +157,22 @@ function pagerHTML(id, data) {
   return `<p class="muted">目前顯示 ${data.start}–${data.end} 筆，共 ${data.total} 筆</p><div class="pager-pages">${buttons.join('')}</div>`;
 }
 
-function imageOf(item) {
-  return item.image || PLACEHOLDER_IMAGE;
+function availabilityBadge(item) {
+  return `<span class="badge ${availabilityClass(item.availabilityStatus)}">${esc(item.availabilityLabel)}</span>`;
+}
+
+function loanBorrowerText(item) {
+  const loan = currentLoanOf(item);
+  return loan && isOpenLoan(loan) ? loan.borrowerName : '—';
+}
+
+function loanDueText(item) {
+  const loan = currentLoanOf(item);
+  return loan && isOpenLoan(loan) ? formatDateTime(loan.expectedReturnAt) : '—';
 }
 
 function setView(view) {
+  refreshOverdueStatus();
   state.view = view;
   document.querySelectorAll('.view').forEach((el) => {
     el.hidden = el.id !== `view-${view}`;
@@ -154,15 +196,21 @@ function refreshFilterOptions() {
   fillSelect($('filterDept'), '全部單位', options.departments, $('filterDept').value);
 }
 
+function feedHTML(rows, emptyText, line) {
+  if (!rows.length) return `<div class="empty">${emptyText}</div>`;
+  return rows.map((row) => `<div class="feed-item">${line(row)}</div>`).join('');
+}
+
 function renderDashboard() {
   const stats = getStats();
-  const monthUses = monthUsageCount();
+  const loanStats = getLoanDashboardStats();
   $('statGrid').innerHTML = [
     ['財產總數', stats.total, '件'],
-    ['已完成盤點', stats.done, '件'],
-    ['待盤點', stats.pending, '件'],
-    ['位置異常', stats.mismatch, '件'],
-    ['本月使用次數', monthUses, '次']
+    ['可借用', stats.available, '件'],
+    ['已借出', stats.checkedOut, '件'],
+    ['今日應歸還', loanStats.dueToday, '件'],
+    ['逾期未還', loanStats.overdue, '件'],
+    ['待盤點', stats.pending, '件']
   ].map(([label, value, unit]) => `
     <article class="stat-card"><small>${label}</small><strong>${value}</strong><em>${unit}</em></article>
   `).join('');
@@ -179,28 +227,39 @@ function renderDashboard() {
     `).join('')
     : '<div class="empty">尚無位置資料</div>';
 
-  const audits = listAudits().slice(0, 5);
-  $('recentAudits').innerHTML = audits.length
-    ? audits.map((log) => {
-      const item = getItem(log.propertyId);
-      return `<div class="feed-item"><strong>${esc(item?.name || '財產')} · ${esc(log.propertyId)}</strong><span>${esc(log.result)} · ${esc(formatDateTime(log.auditedAt))}</span></div>`;
-    }).join('')
-    : '<div class="empty">尚無盤點紀錄</div>';
+  const checkouts = listLoans().slice(0, 5);
+  $('recentCheckouts').innerHTML = feedHTML(checkouts, '尚無借出紀錄', (loan) => `
+    <strong>${esc(loan.propertyName)} · ${esc(loan.propertyId)}</strong>
+    <span>${esc(loan.borrowerName)} · ${esc(formatDateTime(loan.checkedOutAt))}</span>
+  `);
 
-  const usages = listUsage().slice(0, 5);
-  $('recentUsage').innerHTML = usages.length
-    ? usages.map((log) => {
-      const item = getItem(log.propertyId);
-      return `<div class="feed-item"><strong>${esc(item?.name || '財產')} · ${esc(log.propertyId)}</strong><span>${esc(log.userName)} · ${esc(formatDateTime(log.usedAt))}</span></div>`;
-    }).join('')
-    : '<div class="empty">尚無使用紀錄</div>';
+  const returns = listLoans()
+    .filter((loan) => loan.returnedAt)
+    .sort((a, b) => new Date(b.returnedAt) - new Date(a.returnedAt))
+    .slice(0, 5);
+  $('recentReturns').innerHTML = feedHTML(returns, '尚無歸還紀錄', (loan) => `
+    <strong>${esc(loan.propertyName)} · ${esc(loan.propertyId)}</strong>
+    <span>${esc(loan.borrowerName)} · ${esc(formatDateTime(loan.returnedAt))}</span>
+  `);
+
+  const overdue = listLoans().filter((loan) => isLoanOverdue(loan));
+  $('overdueList').innerHTML = overdue.length
+    ? overdue.slice(0, 8).map((loan) => `
+      <div class="feed-item">
+        <strong>${esc(loan.propertyName)} · ${esc(loan.propertyId)}</strong>
+        <span class="badge alert">${esc(overdueDuration(loan))}</span>
+        <div class="muted">${esc(loan.borrowerName)} · 應於 ${esc(formatDateTime(loan.expectedReturnAt))} 歸還</div>
+        <button type="button" class="link-btn" data-checkin="${esc(loan.propertyId)}">辦理歸還</button>
+      </div>
+    `).join('')
+    : '<div class="empty">目前沒有逾期未還財產</div>';
 }
 
 function renderInventory() {
   const data = paginate(filteredItems(), state.page);
   state.page = data.page;
   if (!data.total) {
-    $('inventoryBody').innerHTML = '<tr><td colspan="10"><div class="empty">找不到符合條件的財產</div></td></tr>';
+    $('inventoryBody').innerHTML = '<tr><td colspan="13"><div class="empty">找不到符合條件的財產</div></td></tr>';
     $('inventoryCards').innerHTML = '<div class="empty">找不到符合條件的財產</div>';
     $('inventoryPager').innerHTML = pagerHTML('inventory', data);
     return;
@@ -217,6 +276,9 @@ function renderInventory() {
       <td>${item.useCount}</td>
       <td><span class="badge">${esc(displayValue(item.status))}</span></td>
       <td><span class="badge ${auditStatusClass(item.auditStatus)}">${esc(item.auditStatus)}</span></td>
+      <td>${availabilityBadge(item)}</td>
+      <td>${esc(loanBorrowerText(item))}</td>
+      <td>${esc(loanDueText(item))}</td>
       <td><button type="button" class="link-btn" data-open-item="${esc(item.propertyId)}">查看</button></td>
     </tr>
   `).join('');
@@ -227,7 +289,7 @@ function renderInventory() {
       <div class="body">
         <h3>${esc(item.name)}</h3>
         <div class="pid">${esc(item.propertyId)}</div>
-        <div class="meta-row"><span>${esc(displayValue(item.location))}</span><span class="badge ${auditStatusClass(item.auditStatus)}">${esc(item.auditStatus)}</span></div>
+        <div class="meta-row"><span>${esc(displayValue(item.location))}</span>${availabilityBadge(item)}</div>
         <div class="meta-row"><span>${esc(displayValue(item.custodian))}</span><span>使用 ${item.useCount} 次</span></div>
         <div class="card-actions">
           <button type="button" class="link-btn" data-open-item="${esc(item.propertyId)}">查看資料</button>
@@ -235,8 +297,172 @@ function renderInventory() {
       </div>
     </article>
   `).join('');
-
   $('inventoryPager').innerHTML = pagerHTML('inventory', data);
+}
+
+function loanRowHTML(loan) {
+  const item = getItem(loan.propertyId);
+  const overdue = isLoanOverdue(loan);
+  return `
+    <div class="audit-item ${overdue ? 'overdue-box' : ''}">
+      <div class="thumb"><img src="${esc(imageOf(item))}" alt="${esc(loan.propertyName)}"></div>
+      <div>
+        <strong>${esc(loan.propertyName)}</strong>
+        <div class="pid">${esc(loan.propertyId)}</div>
+        <div class="muted">${esc(loan.borrowerName)}／${esc(loan.borrowerDepartment)}</div>
+        <div class="muted">借出 ${esc(formatDateTime(loan.checkedOutAt))} · 應還 ${esc(formatDateTime(loan.expectedReturnAt))}</div>
+        ${overdue ? `<div class="badge alert">${esc(overdueDuration(loan))}</div>` : ''}
+      </div>
+      <div>
+        <span class="badge ${overdue ? 'alert' : 'loan'}">${esc(displayLoanStatus(loan))}</span>
+      </div>
+      <div class="card-actions">
+        <button type="button" class="link-btn" data-open-item="${esc(loan.propertyId)}">查看</button>
+        <button type="button" class="primary" data-checkin="${esc(loan.propertyId)}">辦理歸還</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderLoans() {
+  refreshOverdueStatus();
+  const stats = getStats();
+  const loanStats = getLoanDashboardStats();
+  $('loanStatGrid').innerHTML = [
+    ['可借用財產', stats.available, '件'],
+    ['已借出', stats.checkedOut, '件'],
+    ['今日應歸還', loanStats.dueToday, '件'],
+    ['逾期未還', loanStats.overdue, '件'],
+    ['維修中', stats.maintenance, '件']
+  ].map(([label, value, unit]) => `
+    <article class="stat-card"><small>${label}</small><strong>${value}</strong><em>${unit}</em></article>
+  `).join('');
+
+  const q = $('loanQuery').value.trim().toLowerCase();
+  const mode = $('loanStatusFilter').value;
+  let title = '目前借出中';
+  let rows = [];
+
+  if (mode === 'available' || mode === 'maintenance') {
+    title = mode === 'available' ? '可借用財產' : '維修中財產';
+    rows = listItems().filter((item) => item.availabilityStatus === mode).filter((item) => {
+      if (!q) return true;
+      return [item.propertyId, item.name, item.location].join(' ').toLowerCase().includes(q);
+    });
+    const data = paginate(rows, state.loanPage);
+    state.loanPage = data.page;
+    $('loanSectionTitle').textContent = title;
+    $('loanBoard').innerHTML = data.rows.length
+      ? data.rows.map((item) => `
+        <div class="audit-item">
+          <div class="thumb"><img src="${esc(imageOf(item))}" alt="${esc(item.name)}"></div>
+          <div>
+            <strong>${esc(item.name)}</strong>
+            <div class="pid">${esc(item.propertyId)}</div>
+            <div class="muted">${esc(displayValue(item.location))}</div>
+          </div>
+          ${availabilityBadge(item)}
+          <div class="card-actions">
+            <button type="button" class="link-btn" data-open-item="${esc(item.propertyId)}">查看</button>
+            ${mode === 'available' ? `<button type="button" class="primary" data-checkout="${esc(item.propertyId)}">辦理借出</button>` : ''}
+          </div>
+        </div>
+      `).join('')
+      : '<div class="empty">找不到符合條件的財產</div>';
+    $('loanPager').innerHTML = pagerHTML('loans', data);
+    return;
+  }
+
+  let loans = listLoans().filter((loan) => isOpenLoan(loan));
+  if (mode === 'checked_out') {
+    title = '已借出';
+    loans = loans.filter((loan) => !isLoanOverdue(loan));
+  } else if (mode === 'overdue') {
+    title = '逾期未還';
+    loans = loans.filter((loan) => isLoanOverdue(loan));
+  } else if (mode === 'dueSoon') {
+    title = '即將到期（24 小時內）';
+    loans = loans.filter((loan) => isDueWithinHours(loan, 24) || isDueToday(loan));
+  } else {
+    title = '目前借出中';
+  }
+  if (q) {
+    loans = loans.filter((loan) => [loan.propertyId, loan.propertyName, loan.borrowerName, loan.borrowerDepartment, loan.id].join(' ').toLowerCase().includes(q));
+  }
+  const data = paginate(loans, state.loanPage);
+  state.loanPage = data.page;
+  $('loanSectionTitle').textContent = title;
+  $('loanBoard').innerHTML = data.rows.length
+    ? data.rows.map(loanRowHTML).join('')
+    : '<div class="empty">目前沒有符合條件的借用資料</div>';
+  $('loanPager').innerHTML = pagerHTML('loans', data);
+}
+
+function filteredHistoryLoans() {
+  const q = $('histQuery').value.trim().toLowerCase();
+  const propertyId = $('histProperty').value.trim();
+  const borrower = $('histBorrower').value.trim().toLowerCase();
+  const status = $('histStatus').value;
+  const from = $('histFrom').value ? new Date(`${$('histFrom').value}T00:00:00`) : null;
+  const to = $('histTo').value ? new Date(`${$('histTo').value}T23:59:59`) : null;
+  return listLoans().filter((loan) => {
+    const hay = [loan.id, loan.propertyName, loan.propertyId, loan.borrowerName, loan.borrowerId, loan.purpose, loan.note].join(' ').toLowerCase();
+    if (q && !hay.includes(q)) return false;
+    if (propertyId && loan.propertyId !== propertyId) return false;
+    if (borrower && !loan.borrowerName.toLowerCase().includes(borrower)) return false;
+    const shown = displayLoanStatus(loan);
+    if (status === 'checked_out' && shown !== '借用中') return false;
+    if (status === 'overdue' && shown !== '已逾期') return false;
+    if (status === 'returned' && shown !== '已歸還') return false;
+    if (status === 'cancelled' && shown !== '已取消') return false;
+    const at = new Date(loan.checkedOutAt);
+    if (from && at < from) return false;
+    if (to && at > to) return false;
+    return true;
+  });
+}
+
+function renderLoanHistory() {
+  const rows = filteredHistoryLoans();
+  const data = paginate(rows, state.loanHistoryPage);
+  state.loanHistoryPage = data.page;
+  if (!data.total) {
+    $('loanHistoryBody').innerHTML = '<tr><td colspan="15"><div class="empty">找不到符合條件的借用紀錄</div></td></tr>';
+    $('loanHistoryCards').innerHTML = '<div class="empty">找不到符合條件的借用紀錄</div>';
+    $('loanHistoryPager').innerHTML = pagerHTML('loanHistory', data);
+    return;
+  }
+  $('loanHistoryBody').innerHTML = data.rows.map((loan) => `
+    <tr>
+      <td class="pid">${esc(loan.id)}</td>
+      <td>${esc(loan.propertyName)}</td>
+      <td class="pid">${esc(loan.propertyId)}</td>
+      <td>${esc(loan.borrowerName)}</td>
+      <td>${esc(loan.borrowerId)}</td>
+      <td>${esc(loan.borrowerDepartment)}</td>
+      <td>${esc(formatDateTime(loan.checkedOutAt))}</td>
+      <td>${esc(formatDateTime(loan.expectedReturnAt))}</td>
+      <td>${esc(loan.returnedAt ? formatDateTime(loan.returnedAt) : '尚未歸還')}</td>
+      <td>${esc(loan.purpose)}</td>
+      <td>${esc(loan.returnOperator || loan.checkoutOperator)}</td>
+      <td><span class="badge ${displayLoanStatus(loan) === '已逾期' ? 'alert' : displayLoanStatus(loan) === '借用中' ? 'loan' : 'ok'}">${esc(displayLoanStatus(loan))}</span></td>
+      <td>${esc(loan.returnResult || '—')}</td>
+      <td>${esc(loan.note || '—')}</td>
+      <td><button type="button" class="link-btn" data-loan-detail="${esc(loan.id)}">查看完整紀錄</button></td>
+    </tr>
+  `).join('');
+  $('loanHistoryCards').innerHTML = data.rows.map((loan) => `
+    <article class="asset-card">
+      <div class="body">
+        <h3>${esc(loan.propertyName)}</h3>
+        <div class="pid">${esc(loan.id)}</div>
+        <div class="meta-row"><span>${esc(loan.borrowerName)}</span><span class="badge ${displayLoanStatus(loan) === '已逾期' ? 'alert' : 'loan'}">${esc(displayLoanStatus(loan))}</span></div>
+        <div class="muted">${esc(formatDateTime(loan.checkedOutAt))} → ${esc(loan.returnedAt ? formatDateTime(loan.returnedAt) : '尚未歸還')}</div>
+        <button type="button" class="link-btn" data-loan-detail="${esc(loan.id)}">查看完整紀錄</button>
+      </div>
+    </article>
+  `).join('');
+  $('loanHistoryPager').innerHTML = pagerHTML('loanHistory', data);
 }
 
 function renderAuditPage() {
@@ -244,11 +470,7 @@ function renderAuditPage() {
   const percent = stats.total ? Math.round((stats.done / stats.total) * 100) : 0;
   $('auditSummary').textContent = `已完成 ${stats.done} 件，待盤點 ${stats.pending} 件，完成率 ${percent}%`;
   $('auditProgressBar').style.width = `${percent}%`;
-
-  const pending = sortItems(
-    listItems().filter((item) => item.auditStatus === AUDIT_STATUS.PENDING),
-    'propertyId'
-  );
+  const pending = sortItems(listItems().filter((item) => item.auditStatus === AUDIT_STATUS.PENDING), 'propertyId');
   const data = paginate(pending, state.auditPage);
   state.auditPage = data.page;
   $('auditList').innerHTML = data.rows.length
@@ -302,29 +524,46 @@ function renderLocations() {
 
 function renderNotify() {
   const mismatch = listItems().filter((item) => item.auditStatus === AUDIT_STATUS.MISMATCH || item.auditStatus === AUDIT_STATUS.MISSING);
+  const overdue = listItems().filter((item) => item.availabilityStatus === AVAILABILITY.OVERDUE);
   const pending = getStats().pending;
-  $('notifyDot').hidden = mismatch.length === 0 && pending === 0;
-  if (!mismatch.length && pending === 0) {
+  $('notifyDot').hidden = mismatch.length === 0 && pending === 0 && overdue.length === 0;
+  if (!mismatch.length && pending === 0 && !overdue.length) {
     $('notifyList').innerHTML = '<p class="muted">目前沒有待處理通知</p>';
     return;
   }
-  const items = mismatch.slice(0, 5).map((item) => `
+  const items = [...overdue, ...mismatch].slice(0, 6).map((item) => `
     <div class="notify-item">
       <button type="button" data-open-item="${esc(item.propertyId)}">${esc(item.name)} · ${esc(item.propertyId)}</button>
-      <div class="muted">${esc(item.auditStatus)}</div>
+      <div class="muted">${esc(item.availabilityLabel)} · ${esc(item.auditStatus)}</div>
     </div>
   `).join('');
-  $('notifyList').innerHTML = `<p class="muted">待盤點 ${pending} 件，位置異常 ${mismatch.length} 件</p>${items || ''}`;
+  $('notifyList').innerHTML = `<p class="muted">待盤點 ${pending} 件，逾期未還 ${overdue.length} 件，位置異常 ${mismatch.length} 件</p>${items || ''}`;
 }
 
 function render() {
+  refreshOverdueStatus();
   refreshFilterOptions();
   renderNotify();
   if (state.view === 'dashboard') renderDashboard();
   if (state.view === 'inventory') renderInventory();
+  if (state.view === 'loans') renderLoans();
+  if (state.view === 'loanHistory') renderLoanHistory();
   if (state.view === 'audit') renderAuditPage();
   if (state.view === 'usage') renderUsagePage();
   if (state.view === 'locations') renderLocations();
+}
+
+function loanActionButtons(item) {
+  if (item.availabilityStatus === AVAILABILITY.MAINTENANCE) {
+    return `<button type="button" class="primary" disabled>辦理借出</button><p class="muted">此財產維修中</p>`;
+  }
+  if (item.availabilityStatus === AVAILABILITY.LOST) {
+    return `<button type="button" class="primary" disabled>辦理借出</button><p class="muted">此財產狀態為異常，不可再次借出</p>`;
+  }
+  if (item.availabilityStatus === AVAILABILITY.CHECKED_OUT || item.availabilityStatus === AVAILABILITY.OVERDUE) {
+    return `<button type="button" class="primary" data-checkin="${esc(item.propertyId)}">辦理歸還</button>`;
+  }
+  return `<button type="button" class="primary" data-checkout="${esc(item.propertyId)}">辦理借出</button>`;
 }
 
 function openItem(propertyId) {
@@ -333,9 +572,16 @@ function openItem(propertyId) {
     toast('找不到對應財產', 'error');
     return;
   }
+  const loan = currentLoanOf(item);
+  const alert = item.returnAlert === 'damaged'
+    ? '<div class="warn-banner danger">此財產最近歸還時有損壞，請管理者後續處理。</div>'
+    : item.returnAlert === 'missing_parts'
+      ? '<div class="warn-banner">此財產最近歸還時配件缺少，請管理者後續處理。</div>'
+      : '';
   $('detailTitle').textContent = item.name;
   $('detailBody').innerHTML = `
     <div class="detail-photo"><img src="${esc(imageOf(item))}" alt="${esc(item.name)}"></div>
+    ${alert}
     <dl>
       ${[
         ['財產名稱', item.name],
@@ -347,11 +593,16 @@ function openItem(propertyId) {
         ['單位', displayValue(item.unit)],
         ['單價', formatPrice(item.price)],
         ['購買日期', formatDate(item.purchaseDate)],
-        ['使用年限', isFiniteNumber(item.serviceLife) ? `${item.serviceLife} 年` : '未提供'],
+        ['使用年限', Number.isFinite(item.serviceLife) ? `${item.serviceLife} 年` : '未提供'],
         ['廠商', displayValue(item.supplier)],
         ['廠牌', displayValue(item.brand)],
         ['型號', displayValue(item.model)],
-        ['財產狀態', displayValue(item.status)],
+        ['財產狀態', item.availabilityStatus === AVAILABILITY.LOST ? '異常' : displayValue(item.status)],
+        ['借用狀態', item.availabilityLabel],
+        ['目前借用人', loan && isOpenLoan(loan) ? loan.borrowerName : '—'],
+        ['借出時間', loan && isOpenLoan(loan) ? formatDateTime(loan.checkedOutAt) : '—'],
+        ['預計歸還時間', loan && isOpenLoan(loan) ? formatDateTime(loan.expectedReturnAt) : '—'],
+        ['借用用途', loan && isOpenLoan(loan) ? loan.purpose : '—'],
         ['使用次數', String(item.useCount)],
         ['最後盤點時間', item.lastAuditAt ? formatDateTime(item.lastAuditAt) : '尚未盤點'],
         ['盤點狀態', item.auditStatus],
@@ -359,7 +610,8 @@ function openItem(propertyId) {
       ].map(([k, v]) => `<div class="kv"><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}
     </dl>
     <div class="action-grid">
-      <button type="button" class="primary" data-usage="${esc(item.propertyId)}">登記使用</button>
+      ${loanActionButtons(item)}
+      <button type="button" class="secondary" data-usage="${esc(item.propertyId)}">登記使用</button>
       <button type="button" class="primary" data-audit="${esc(item.propertyId)}">執行盤點</button>
       <button type="button" class="secondary" data-location="${esc(item.propertyId)}">更新位置</button>
       <button type="button" class="secondary" data-image="${esc(item.propertyId)}">上傳圖片</button>
@@ -367,10 +619,6 @@ function openItem(propertyId) {
     </div>
   `;
   openDialog('detailDialog');
-}
-
-function isFiniteNumber(value) {
-  return typeof value === 'number' && Number.isFinite(value);
 }
 
 function openUsage(propertyId) {
@@ -440,6 +688,14 @@ function renderHistory() {
     `);
     return;
   }
+  if (state.historyTab === 'loan') {
+    $('historyBody').innerHTML = historyListHTML(listLoans(id), '尚無借用紀錄', (log) => `
+      <strong>${esc(log.id)} · ${esc(displayLoanStatus(log))}</strong>
+      <div>${esc(log.borrowerName)}／${esc(log.borrowerDepartment)}</div>
+      <div>${esc(formatDateTime(log.checkedOutAt))} → ${esc(log.returnedAt ? formatDateTime(log.returnedAt) : '尚未歸還')}</div>
+    `);
+    return;
+  }
   if (state.historyTab === 'audit') {
     $('historyBody').innerHTML = historyListHTML(listAudits(id), '尚無盤點紀錄', (log) => `
       <strong>${esc(log.result)} · ${esc(formatDateTime(log.auditedAt))}</strong>
@@ -466,6 +722,107 @@ function openHistory(propertyId) {
   });
   renderHistory();
   openDialog('historyDialog');
+}
+
+function readCheckoutForm() {
+  return {
+    propertyId: $('checkoutPropertyId').value,
+    propertyName: $('checkoutPropertyName').value,
+    borrowerName: $('checkoutBorrower').value,
+    borrowerId: $('checkoutBorrowerId').value,
+    borrowerDepartment: $('checkoutDept').value,
+    checkedOutAt: $('checkoutAt').value,
+    expectedReturnAt: $('checkoutDue').value,
+    purpose: $('checkoutPurpose').value,
+    checkoutOperator: $('checkoutOperator').value,
+    checkoutCondition: $('checkoutCondition').value,
+    note: $('checkoutNote').value
+  };
+}
+
+function openCheckout(propertyId) {
+  const item = getItem(propertyId);
+  if (!item) return;
+  if (item.availabilityStatus !== AVAILABILITY.AVAILABLE) {
+    toast(item.availabilityStatus === AVAILABILITY.MAINTENANCE ? '此財產維修中' : '此財產目前不可借用', 'error');
+    return;
+  }
+  if (getOpenLoan(item.propertyId)) {
+    toast('此財產已有未歸還紀錄，不可重複借出', 'error');
+    return;
+  }
+  $('checkoutEyebrow').textContent = `${item.name} · ${item.propertyId}`;
+  $('checkoutPropertyId').value = item.propertyId;
+  $('checkoutPropertyName').value = item.name;
+  $('checkoutBorrower').value = '';
+  $('checkoutBorrowerId').value = '';
+  $('checkoutDept').value = '';
+  $('checkoutAt').value = toInputDateTime();
+  const due = new Date();
+  due.setDate(due.getDate() + 1);
+  $('checkoutDue').value = toInputDateTime(due);
+  $('checkoutPurpose').value = '';
+  $('checkoutOperator').value = '管理者';
+  $('checkoutCondition').value = '';
+  $('checkoutNote').value = '';
+  openDialog('checkoutDialog');
+}
+
+function openCheckin(propertyId) {
+  const item = getItem(propertyId);
+  if (!item) return;
+  const loan = getOpenLoan(item.propertyId);
+  if (!loan) {
+    toast('找不到未歸還的借用紀錄', 'error');
+    return;
+  }
+  $('checkinEyebrow').textContent = `${item.name} · ${item.propertyId}`;
+  $('checkinPropertyId').value = item.propertyId;
+  $('checkinSummary').innerHTML = [
+    ['財產名稱', item.name],
+    ['財產編號', item.propertyId],
+    ['借用人', loan.borrowerName],
+    ['借出時間', formatDateTime(loan.checkedOutAt)],
+    ['原定歸還時間', formatDateTime(loan.expectedReturnAt)],
+    ['借用用途', loan.purpose]
+  ].map(([k, v]) => `<div><strong>${esc(k)}：</strong>${esc(v)}</div>`).join('');
+  $('checkinAt').value = toInputDateTime();
+  $('checkinOperator').value = '管理者';
+  $('checkinCondition').value = '';
+  $('checkinLocation').value = item.location || '';
+  $('checkinNote').value = '';
+  document.querySelectorAll('input[name="checkinResult"]').forEach((el) => { el.checked = false; });
+  openDialog('checkinDialog');
+}
+
+function openLoanDetail(loanId) {
+  const loan = getLoan(loanId);
+  if (!loan) {
+    toast('找不到借用紀錄', 'error');
+    return;
+  }
+  $('loanDetailTitle').textContent = loan.id;
+  $('loanDetailBody').innerHTML = `<dl>${[
+    ['借用編號', loan.id],
+    ['財產名稱', loan.propertyName],
+    ['財產編號', loan.propertyId],
+    ['借用人', loan.borrowerName],
+    ['學號或教職員編號', loan.borrowerId],
+    ['借用單位', loan.borrowerDepartment],
+    ['借出時間', formatDateTime(loan.checkedOutAt)],
+    ['預計歸還時間', formatDateTime(loan.expectedReturnAt)],
+    ['實際歸還時間', loan.returnedAt ? formatDateTime(loan.returnedAt) : '尚未歸還'],
+    ['借用用途', loan.purpose],
+    ['借出經手人', loan.checkoutOperator],
+    ['歸還經手人', loan.returnOperator || '—'],
+    ['借出時狀況', displayValue(loan.checkoutCondition)],
+    ['歸還時狀況', displayValue(loan.returnCondition)],
+    ['借用狀態', displayLoanStatus(loan)],
+    ['歸還結果', loan.returnResult || '—'],
+    ['歸還位置', loan.returnLocation || '—'],
+    ['備註', displayValue(loan.note)]
+  ].map(([k, v]) => `<div class="kv"><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`;
+  openDialog('loanDetailDialog');
 }
 
 function askLocationConfirm(propertyId, fromLocation, toLocation) {
@@ -495,7 +852,27 @@ function lookupScan(raw) {
   state.page = 1;
   setView('inventory');
   openItem(item.propertyId);
-  toast(`已找到「${item.name}」`);
+  toast(`已找到「${item.name}」，目前狀態：${item.availabilityLabel}`);
+}
+
+function afterMutation(propertyId, message) {
+  render();
+  if (propertyId) openItem(propertyId);
+  toast(message);
+}
+
+function downloadCsv() {
+  const csv = exportLoansCsv(filteredHistoryLoans());
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `借用紀錄-${formatDate(new Date().toISOString())}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  toast('已匯出借用紀錄 CSV');
 }
 
 function bindEvents() {
@@ -514,6 +891,21 @@ function bindEvents() {
     if (openBtn) {
       $('notifyPanel').hidden = true;
       openItem(openBtn.dataset.openItem);
+      return;
+    }
+    const checkoutBtn = event.target.closest('[data-checkout]');
+    if (checkoutBtn) {
+      openCheckout(checkoutBtn.dataset.checkout);
+      return;
+    }
+    const checkinBtn = event.target.closest('[data-checkin]');
+    if (checkinBtn) {
+      openCheckin(checkinBtn.dataset.checkin);
+      return;
+    }
+    const loanDetailBtn = event.target.closest('[data-loan-detail]');
+    if (loanDetailBtn) {
+      openLoanDetail(loanDetailBtn.dataset.loanDetail);
       return;
     }
     const usageBtn = event.target.closest('[data-usage]');
@@ -560,7 +952,13 @@ function bindEvents() {
     const pageBtn = event.target.closest('[data-page]');
     if (pageBtn && !pageBtn.disabled) {
       const target = pageBtn.dataset.pageTarget;
-      const key = target === 'audit' ? 'auditPage' : target === 'usage' ? 'usagePage' : 'page';
+      const key = {
+        audit: 'auditPage',
+        usage: 'usagePage',
+        loans: 'loanPage',
+        loanHistory: 'loanHistoryPage',
+        inventory: 'page'
+      }[target] || 'page';
       const current = state[key];
       if (pageBtn.dataset.page === 'prev') state[key] = current - 1;
       else if (pageBtn.dataset.page === 'next') state[key] = current + 1;
@@ -587,6 +985,7 @@ function bindEvents() {
   document.addEventListener('click', (event) => {
     if (!event.target.closest('.notify-wrap')) $('notifyPanel').hidden = true;
   });
+  $('reloadBtn').addEventListener('click', () => window.location.reload());
 
   $('globalSearchForm').addEventListener('submit', (event) => {
     event.preventDefault();
@@ -613,11 +1012,100 @@ function bindEvents() {
     $('filterLocation').value = '';
     $('filterStatus').value = '';
     $('filterAudit').value = '';
+    $('filterAvailability').value = '';
     $('filterDept').value = '';
     $('filterSort').value = 'propertyId';
     state.page = 1;
     renderInventory();
     toast('已清除篩選');
+  });
+
+  $('loanFilterForm').addEventListener('submit', (event) => event.preventDefault());
+  $('loanFilterForm').addEventListener('input', () => { state.loanPage = 1; renderLoans(); });
+  $('loanFilterForm').addEventListener('change', () => { state.loanPage = 1; renderLoans(); });
+  $('clearLoanFilters').addEventListener('click', () => {
+    $('loanQuery').value = '';
+    $('loanStatusFilter').value = 'open';
+    state.loanPage = 1;
+    renderLoans();
+    toast('已清除篩選');
+  });
+
+  $('loanHistoryForm').addEventListener('submit', (event) => event.preventDefault());
+  $('loanHistoryForm').addEventListener('input', () => { state.loanHistoryPage = 1; renderLoanHistory(); });
+  $('loanHistoryForm').addEventListener('change', () => { state.loanHistoryPage = 1; renderLoanHistory(); });
+  $('clearHistFilters').addEventListener('click', () => {
+    $('histQuery').value = '';
+    $('histProperty').value = '';
+    $('histBorrower').value = '';
+    $('histStatus').value = '';
+    $('histFrom').value = '';
+    $('histTo').value = '';
+    state.loanHistoryPage = 1;
+    renderLoanHistory();
+    toast('已清除篩選');
+  });
+  $('exportCsvBtn').addEventListener('click', downloadCsv);
+
+  $('checkoutForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const data = readCheckoutForm();
+    try {
+      if (new Date(data.expectedReturnAt) < new Date(data.checkedOutAt)) {
+        throw new Error('預計歸還時間不得早於借出時間');
+      }
+      state.pendingCheckout = data;
+      $('checkoutConfirmBody').innerHTML = [
+        ['財產', `${data.propertyName}（${data.propertyId}）`],
+        ['借用人', `${data.borrowerName}／${data.borrowerId}`],
+        ['單位', data.borrowerDepartment],
+        ['借出時間', formatDateTime(new Date(data.checkedOutAt).toISOString())],
+        ['預計歸還', formatDateTime(new Date(data.expectedReturnAt).toISOString())],
+        ['用途', data.purpose],
+        ['經手人', data.checkoutOperator]
+      ].map(([k, v]) => `<div><strong>${esc(k)}：</strong>${esc(v)}</div>`).join('');
+      openDialog('checkoutConfirmDialog');
+    } catch (error) {
+      toast(error.message || '請完整填寫借出資料', 'error');
+    }
+  });
+
+  $('checkoutConfirmForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    try {
+      if (!state.pendingCheckout) throw new Error('找不到待確認的借出資料');
+      const { item } = checkout(state.pendingCheckout);
+      state.pendingCheckout = null;
+      closeDialog('checkoutConfirmDialog');
+      closeDialog('checkoutDialog');
+      afterMutation(item.propertyId, '已完成借出，使用次數已更新');
+    } catch (error) {
+      toast(error.message || '借出失敗', 'error');
+    }
+  });
+
+  $('checkinForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    try {
+      const outcome = checkin({
+        propertyId: $('checkinPropertyId').value,
+        returnedAt: $('checkinAt').value,
+        returnOperator: $('checkinOperator').value,
+        returnCondition: $('checkinCondition').value,
+        returnLocation: $('checkinLocation').value,
+        returnResult: result,
+        note: $('checkinNote').value
+      });
+      closeDialog('checkinDialog');
+      let message = '已完成歸還';
+      if (result === RETURN_RESULT.REPAIR) message = '已歸還並改為維修中';
+      if (result === RETURN_RESULT.LOST) message = '已登記遺失，財產狀態改為異常';
+      if (result === RETURN_RESULT.DAMAGED) message = '已歸還，請注意此財產有損壞';
+      if (result === RETURN_RESULT.MISSING_PARTS) message = '已歸還，請注意配件缺少';
+      afterMutation(outcome.item.propertyId, message);
+    } catch (error) {
+      toast(error.message || '歸還失敗', 'error');
+    }
   });
 
   $('usageForm').addEventListener('submit', (event) => {
@@ -632,9 +1120,7 @@ function bindEvents() {
         note: $('usageNote').value
       });
       closeDialog('usageDialog');
-      render();
-      openItem(item.propertyId);
-      toast('已登記使用，使用次數已更新');
+      afterMutation(item.propertyId, '已登記使用，使用次數已更新');
     } catch (error) {
       toast(error.message || '登記使用失敗', 'error');
     }
@@ -654,9 +1140,7 @@ function bindEvents() {
         note: $('auditNote').value
       });
       closeDialog('auditDialog');
-      render();
-      openItem(outcome.item.propertyId);
-      toast('盤點結果已儲存');
+      afterMutation(outcome.item.propertyId, '盤點結果已儲存');
       if (outcome.needsLocationConfirm) {
         askLocationConfirm(outcome.item.propertyId, outcome.entry.registeredLocation, outcome.entry.actualLocation);
       }
@@ -676,9 +1160,7 @@ function bindEvents() {
         reason: $('locationReason').value
       });
       closeDialog('locationDialog');
-      render();
-      openItem(item.propertyId);
-      toast('位置已更新，並已建立異動紀錄');
+      afterMutation(item.propertyId, '位置已更新，並已建立異動紀錄');
     } catch (error) {
       toast(error.message || '位置更新失敗', 'error');
     }
@@ -695,9 +1177,7 @@ function bindEvents() {
         reason: '盤點後確認更新位置'
       });
       closeDialog('confirmDialog');
-      render();
-      openItem($('confirmPropertyId').value);
-      toast('已確認更新位置');
+      afterMutation($('confirmPropertyId').value, '已確認更新位置');
     } catch (error) {
       toast(error.message || '位置更新失敗', 'error');
     }
@@ -745,9 +1225,7 @@ function bindEvents() {
     try {
       const item = saveImage($('imagePropertyId').value, state.pendingImage);
       closeDialog('imageDialog');
-      render();
-      openItem(item.propertyId);
-      toast('圖片已儲存');
+      afterMutation(item.propertyId, '圖片已儲存');
     } catch (error) {
       toast(error.message || '圖片儲存失敗', 'error');
     }
@@ -775,19 +1253,28 @@ function bindEvents() {
   });
 }
 
+function showLoadError(message) {
+  setLoading(false);
+  $('loadError').hidden = false;
+  $('loadErrorText').textContent = message;
+  document.querySelectorAll('.view').forEach((el) => { el.hidden = true; });
+}
+
 async function init() {
   bindEvents();
+  $('loadError').hidden = true;
   setLoading(true, '正在載入財產清冊…');
   try {
     await loadCatalog();
+    refreshOverdueStatus();
     refreshFilterOptions();
+    setLoading(false);
+    $('loadError').hidden = true;
     setView('dashboard');
     toast(`已載入 ${listItems().length} 筆財產`);
   } catch (error) {
-    $('main').insertAdjacentHTML('afterbegin', `<div class="empty">載入失敗：${esc(error.message)}。請以本機伺服器開啟網站後再試。</div>`);
+    showLoadError(error.message || '無法載入財產清冊，請重新載入。');
     toast(error.message || '載入失敗', 'error');
-  } finally {
-    setLoading(false);
   }
 }
 

@@ -1,26 +1,23 @@
-import { readJson, uid, writeJson } from './storage.js';
+import { STORAGE_KEYS, readStore, uid, writeStore } from './storageService.js';
 import { AUDIT_RESULTS, AUDIT_STATUS, nowIso } from '../js/format.js';
 import { getItem, patchItem, updateLocation } from './inventoryService.js';
 
-const AUDIT_KEY = 'auditLogs';
-const LOCATION_KEY = 'locationLogs';
-
 function read(key) {
-  return readJson(key, []);
+  return readStore(key, []);
 }
 
 function write(key, list) {
-  writeJson(key, list);
+  writeStore(key, list);
 }
 
 export function listAudits(propertyId) {
-  const logs = read(AUDIT_KEY).slice().sort((a, b) => new Date(b.auditedAt) - new Date(a.auditedAt));
+  const logs = read(STORAGE_KEYS.audits).slice().sort((a, b) => new Date(b.auditedAt) - new Date(a.auditedAt));
   if (!propertyId) return logs;
   return logs.filter((log) => log.propertyId === propertyId);
 }
 
 export function listLocationChanges(propertyId) {
-  const logs = read(LOCATION_KEY).slice().sort((a, b) => new Date(b.changedAt) - new Date(a.changedAt));
+  const logs = read(STORAGE_KEYS.locations).slice().sort((a, b) => new Date(b.changedAt) - new Date(a.changedAt));
   if (!propertyId) return logs;
   return logs.filter((log) => log.propertyId === propertyId);
 }
@@ -58,9 +55,9 @@ export function addAudit({ propertyId, registeredLocation, actualLocation, resul
     note: (note || '').trim()
   };
 
-  const list = read(AUDIT_KEY);
+  const list = read(STORAGE_KEYS.audits);
   list.push(entry);
-  write(AUDIT_KEY, list);
+  write(STORAGE_KEYS.audits, list);
 
   const updated = patchItem(propertyId, {
     lastAuditAt: entry.auditedAt,
@@ -89,9 +86,9 @@ export function confirmLocationUpdate({ propertyId, fromLocation, toLocation, op
     reason: (reason || '盤點後確認更新位置').trim(),
     changedAt: nowIso()
   };
-  const list = read(LOCATION_KEY);
+  const list = read(STORAGE_KEYS.locations);
   list.push(entry);
-  write(LOCATION_KEY, list);
+  write(STORAGE_KEYS.locations, list);
   const updated = updateLocation(propertyId, entry.toLocation);
   return { entry, item: updated };
 }

@@ -56,11 +56,19 @@ export function formatDate(iso) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-export function formatDateTime(iso) {
-  if (!iso) return '尚未盤點';
+export function formatDateTime(iso, empty = '未提供') {
+  if (!iso) return empty;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '未提供';
   return `${formatDate(iso)} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+export function availabilityClass(status) {
+  if (status === 'available') return 'ok';
+  if (status === 'checked_out') return 'loan';
+  if (status === 'overdue' || status === 'lost') return 'alert';
+  if (status === 'maintenance') return 'pending';
+  return '';
 }
 
 export function toInputDateTime(date = new Date()) {

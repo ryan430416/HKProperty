@@ -25,6 +25,8 @@
       <nav class="side-nav">
         <button type="button" class="nav-item active" data-view="dashboard">系統總覽</button>
         <button type="button" class="nav-item" data-view="inventory">財產清冊</button>
+        <button type="button" class="nav-item" data-view="loans">借出管理</button>
+        <button type="button" class="nav-item" data-view="loanHistory">借用紀錄</button>
         <button type="button" class="nav-item" data-view="audit">盤點作業</button>
         <button type="button" class="nav-item" data-view="usage">使用紀錄</button>
         <button type="button" class="nav-item" data-view="locations">位置管理</button>
@@ -70,8 +72,12 @@
           <div class="spinner" aria-hidden="true"></div>
           <p>資料載入中…</p>
         </div>
+        <div id="loadError" class="load-error" hidden>
+          <p id="loadErrorText">無法載入財產清冊。</p>
+          <button type="button" class="primary" id="reloadBtn">重新載入</button>
+        </div>
 
-        <section class="view" id="view-dashboard" aria-label="系統總覽">
+        <section class="view" id="view-dashboard" hidden aria-label="系統總覽">
           <div class="stat-grid" id="statGrid"></div>
           <div class="dash-grid">
             <article class="panel">
@@ -79,12 +85,16 @@
               <div id="locationRank"></div>
             </article>
             <article class="panel">
-              <h2>最近盤點紀錄</h2>
-              <div id="recentAudits"></div>
+              <h2>最近借出紀錄</h2>
+              <div id="recentCheckouts"></div>
             </article>
             <article class="panel">
-              <h2>最近使用紀錄</h2>
-              <div id="recentUsage"></div>
+              <h2>最近歸還紀錄</h2>
+              <div id="recentReturns"></div>
+            </article>
+            <article class="panel">
+              <h2>逾期財產清單</h2>
+              <div id="overdueList"></div>
             </article>
           </div>
         </section>
@@ -106,6 +116,16 @@
             <div class="field">
               <label for="filterAudit">盤點狀態</label>
               <select id="filterAudit"></select>
+            </div>
+            <div class="field">
+              <label for="filterAvailability">借用狀態</label>
+              <select id="filterAvailability">
+                <option value="">全部借用狀態</option>
+                <option value="available">可借用</option>
+                <option value="checked_out">已借出</option>
+                <option value="overdue">已逾期</option>
+                <option value="maintenance">維修中</option>
+              </select>
             </div>
             <div class="field">
               <label for="filterDept">保管單位</label>
@@ -137,6 +157,9 @@
                   <th scope="col">使用次數</th>
                   <th scope="col">財產狀態</th>
                   <th scope="col">盤點狀態</th>
+                  <th scope="col">借用狀態</th>
+                  <th scope="col">目前借用人</th>
+                  <th scope="col">預計歸還日</th>
                   <th scope="col">操作</th>
                 </tr>
               </thead>
@@ -145,6 +168,100 @@
           </div>
           <div class="card-list" id="inventoryCards"></div>
           <div class="pager" id="inventoryPager"></div>
+        </section>
+
+        <section class="view" id="view-loans" hidden aria-label="借出管理">
+          <div class="stat-grid" id="loanStatGrid"></div>
+          <form class="filters" id="loanFilterForm">
+            <div class="field grow">
+              <label for="loanQuery">搜尋</label>
+              <input id="loanQuery" type="search" placeholder="財產編號、名稱、借用人、單位" />
+            </div>
+            <div class="field">
+              <label for="loanStatusFilter">借用狀態</label>
+              <select id="loanStatusFilter">
+                <option value="open">目前借出中</option>
+                <option value="checked_out">已借出</option>
+                <option value="overdue">已逾期</option>
+                <option value="dueSoon">即將到期</option>
+                <option value="available">可借用財產</option>
+                <option value="maintenance">維修中</option>
+              </select>
+            </div>
+            <div class="field field-action">
+              <button type="button" class="secondary" id="clearLoanFilters">清除篩選</button>
+            </div>
+          </form>
+          <div class="panel">
+            <h2 id="loanSectionTitle">目前借出中</h2>
+            <div id="loanBoard"></div>
+          </div>
+          <div class="pager" id="loanPager"></div>
+        </section>
+
+        <section class="view" id="view-loanHistory" hidden aria-label="借用紀錄">
+          <form class="filters" id="loanHistoryForm">
+            <div class="field grow">
+              <label for="histQuery">關鍵字</label>
+              <input id="histQuery" type="search" placeholder="借用編號、財產、借用人、用途" />
+            </div>
+            <div class="field">
+              <label for="histProperty">財產編號</label>
+              <input id="histProperty" />
+            </div>
+            <div class="field">
+              <label for="histBorrower">借用人</label>
+              <input id="histBorrower" />
+            </div>
+            <div class="field">
+              <label for="histStatus">狀態</label>
+              <select id="histStatus">
+                <option value="">全部狀態</option>
+                <option value="checked_out">借用中</option>
+                <option value="overdue">已逾期</option>
+                <option value="returned">已歸還</option>
+                <option value="cancelled">已取消</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="histFrom">起始日期</label>
+              <input id="histFrom" type="date" />
+            </div>
+            <div class="field">
+              <label for="histTo">結束日期</label>
+              <input id="histTo" type="date" />
+            </div>
+            <div class="field field-action">
+              <button type="button" class="secondary" id="clearHistFilters">清除篩選</button>
+              <button type="button" class="primary" id="exportCsvBtn">匯出 CSV</button>
+            </div>
+          </form>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">借用編號</th>
+                  <th scope="col">財產名稱</th>
+                  <th scope="col">財產編號</th>
+                  <th scope="col">借用人</th>
+                  <th scope="col">學號或教職員編號</th>
+                  <th scope="col">借用單位</th>
+                  <th scope="col">借出時間</th>
+                  <th scope="col">預計歸還時間</th>
+                  <th scope="col">實際歸還時間</th>
+                  <th scope="col">借用用途</th>
+                  <th scope="col">經手人</th>
+                  <th scope="col">借用狀態</th>
+                  <th scope="col">歸還結果</th>
+                  <th scope="col">備註</th>
+                  <th scope="col">操作</th>
+                </tr>
+              </thead>
+              <tbody id="loanHistoryBody"></tbody>
+            </table>
+          </div>
+          <div class="card-list" id="loanHistoryCards"></div>
+          <div class="pager" id="loanHistoryPager"></div>
         </section>
 
         <section class="view" id="view-audit" hidden aria-label="盤點作業">
@@ -348,6 +465,7 @@
     </div>
     <div class="tabs" role="tablist">
       <button type="button" class="tab active" data-history-tab="usage">使用紀錄</button>
+      <button type="button" class="tab" data-history-tab="loan">借用紀錄</button>
       <button type="button" class="tab" data-history-tab="audit">盤點紀錄</button>
       <button type="button" class="tab" data-history-tab="location">位置異動</button>
     </div>
@@ -394,6 +512,147 @@
         <button type="submit" class="primary">確認更新位置</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="checkoutDialog" class="form-dialog">
+    <form id="checkoutForm">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow" id="checkoutEyebrow">辦理借出</p>
+          <h2>辦理借出</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close="checkoutDialog" aria-label="關閉">×</button>
+      </div>
+      <div class="dialog-scroll">
+        <div class="field">
+          <label for="checkoutPropertyId">財產編號 <span class="req">必填</span></label>
+          <input id="checkoutPropertyId" required readonly />
+        </div>
+        <div class="field">
+          <label for="checkoutPropertyName">財產名稱</label>
+          <input id="checkoutPropertyName" readonly />
+        </div>
+        <div class="field">
+          <label for="checkoutBorrower">借用人姓名 <span class="req">必填</span></label>
+          <input id="checkoutBorrower" required maxlength="40" autocomplete="name" />
+        </div>
+        <div class="field">
+          <label for="checkoutBorrowerId">學號或教職員編號 <span class="req">必填</span></label>
+          <input id="checkoutBorrowerId" required maxlength="40" />
+        </div>
+        <div class="field">
+          <label for="checkoutDept">借用單位或系所 <span class="req">必填</span></label>
+          <input id="checkoutDept" required maxlength="60" />
+        </div>
+        <div class="field">
+          <label for="checkoutAt">借出日期與時間 <span class="req">必填</span></label>
+          <input id="checkoutAt" type="datetime-local" required />
+        </div>
+        <div class="field">
+          <label for="checkoutDue">預計歸還日期與時間 <span class="req">必填</span></label>
+          <input id="checkoutDue" type="datetime-local" required />
+        </div>
+        <div class="field">
+          <label for="checkoutPurpose">借用用途 <span class="req">必填</span></label>
+          <input id="checkoutPurpose" required maxlength="80" />
+        </div>
+        <div class="field">
+          <label for="checkoutOperator">經手人 <span class="req">必填</span></label>
+          <input id="checkoutOperator" required maxlength="40" value="管理者" />
+        </div>
+        <div class="field">
+          <label for="checkoutCondition">借出時物品狀況</label>
+          <input id="checkoutCondition" maxlength="80" />
+        </div>
+        <div class="field">
+          <label for="checkoutNote">備註</label>
+          <textarea id="checkoutNote" rows="3" maxlength="200"></textarea>
+        </div>
+      </div>
+      <div class="dialog-actions sticky">
+        <button type="button" class="secondary" data-close="checkoutDialog">取消</button>
+        <button type="submit" class="primary">下一步：確認借出</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="checkoutConfirmDialog" class="form-dialog">
+    <form id="checkoutConfirmForm">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">確認借出</p>
+          <h2>請確認借出資料</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close="checkoutConfirmDialog" aria-label="關閉">×</button>
+      </div>
+      <div class="dialog-scroll" id="checkoutConfirmBody"></div>
+      <div class="dialog-actions sticky">
+        <button type="button" class="secondary" data-close="checkoutConfirmDialog">返回修改</button>
+        <button type="submit" class="primary">確認借出</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="checkinDialog" class="form-dialog">
+    <form id="checkinForm">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow" id="checkinEyebrow">辦理歸還</p>
+          <h2>辦理歸還</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close="checkinDialog" aria-label="關閉">×</button>
+      </div>
+      <div class="dialog-scroll">
+        <input type="hidden" id="checkinPropertyId" />
+        <div id="checkinSummary" class="summary-box"></div>
+        <div class="field">
+          <label for="checkinAt">實際歸還日期與時間 <span class="req">必填</span></label>
+          <input id="checkinAt" type="datetime-local" required />
+        </div>
+        <div class="field">
+          <label for="checkinOperator">歸還經手人 <span class="req">必填</span></label>
+          <input id="checkinOperator" required maxlength="40" value="管理者" />
+        </div>
+        <div class="field">
+          <label for="checkinCondition">歸還時物品狀況</label>
+          <input id="checkinCondition" maxlength="80" />
+        </div>
+        <div class="field">
+          <label for="checkinLocation">歸還後存放地點 <span class="req">必填</span></label>
+          <input id="checkinLocation" required maxlength="40" />
+        </div>
+        <fieldset class="field">
+          <legend>歸還結果 <span class="req">必填</span></legend>
+          <label class="choice"><input type="radio" name="checkinResult" value="正常歸還" required /> 正常歸還</label>
+          <label class="choice"><input type="radio" name="checkinResult" value="有損壞" /> 有損壞</label>
+          <label class="choice"><input type="radio" name="checkinResult" value="配件缺少" /> 配件缺少</label>
+          <label class="choice"><input type="radio" name="checkinResult" value="送修" /> 送修</label>
+          <label class="choice"><input type="radio" name="checkinResult" value="遺失" /> 遺失</label>
+        </fieldset>
+        <div class="field">
+          <label for="checkinNote">備註</label>
+          <textarea id="checkinNote" rows="3" maxlength="200"></textarea>
+        </div>
+      </div>
+      <div class="dialog-actions sticky">
+        <button type="button" class="secondary" data-close="checkinDialog">取消</button>
+        <button type="submit" class="primary">確認歸還</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="loanDetailDialog" class="wide form-dialog">
+    <div class="dialog-head">
+      <div>
+        <p class="eyebrow">完整借用紀錄</p>
+        <h2 id="loanDetailTitle">借用紀錄</h2>
+      </div>
+      <button type="button" class="icon-btn" data-close="loanDetailDialog" aria-label="關閉">×</button>
+    </div>
+    <div class="dialog-scroll" id="loanDetailBody"></div>
+    <div class="dialog-actions sticky">
+      <button type="button" class="secondary" data-close="loanDetailDialog">關閉</button>
+    </div>
   </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>

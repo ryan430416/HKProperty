@@ -1,15 +1,13 @@
-import { readJson, uid, writeJson } from './storage.js';
+import { STORAGE_KEYS, readStore, writeStore } from './storageService.js';
 import { incrementUseCount } from './inventoryService.js';
 import { isCurrentMonth } from '../js/format.js';
 
-const KEY = 'usageLogs';
-
 function all() {
-  return readJson(KEY, []);
+  return readStore(STORAGE_KEYS.usage, []);
 }
 
 function save(list) {
-  writeJson(KEY, list);
+  writeStore(STORAGE_KEYS.usage, list);
 }
 
 export function listUsage(propertyId) {
@@ -18,7 +16,7 @@ export function listUsage(propertyId) {
   return logs.filter((log) => log.propertyId === propertyId);
 }
 
-export function addUsage({ propertyId, userName, department, usedAt, purpose, note }) {
+export function addUsage({ propertyId, userName, department, usedAt, purpose, note, loanId = null, countUsage = true }) {
   if (!propertyId) throw new Error('缺少財產編號');
   if (!userName?.trim()) throw new Error('請填寫使用人');
   if (!department?.trim()) throw new Error('請填寫使用單位');
@@ -29,19 +27,20 @@ export function addUsage({ propertyId, userName, department, usedAt, purpose, no
   if (Number.isNaN(usedDate.getTime())) throw new Error('使用時間格式不正確');
 
   const entry = {
-    id: uid('use'),
+    id: `use-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     propertyId,
     userName: userName.trim(),
     department: department.trim(),
     usedAt: usedDate.toISOString(),
     purpose: purpose.trim(),
-    note: (note || '').trim()
+    note: (note || '').trim(),
+    loanId
   };
 
   const list = all();
   list.push(entry);
   save(list);
-  const item = incrementUseCount(propertyId);
+  const item = countUsage ? incrementUseCount(propertyId) : null;
   return { entry, item };
 }
 
