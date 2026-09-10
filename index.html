@@ -293,9 +293,15 @@
         </section>
 
         <section class="view" id="view-settings" hidden aria-label="系統設定">
-          <div class="panel coming-soon">
+          <div class="panel">
             <h2>系統設定</h2>
-            <p>此功能開發中。未來將提供帳號權限、盤點年度與資料同步設定。</p>
+            <p class="muted">帳號權限、盤點年度與資料同步功能開發中。</p>
+          </div>
+          <div class="panel" style="margin-top:16px">
+            <h2>借出流程自我檢測</h2>
+            <p class="muted">系統會暫時借用一件財產並立即還原 localStorage，不會留下測試紀錄，也不會改寫 390 筆原始清冊。</p>
+            <button type="button" class="primary" id="runLoanTestBtn">執行借出流程測試</button>
+            <div id="loanTestResult" class="test-result" hidden></div>
           </div>
         </section>
       </main>
@@ -315,15 +321,17 @@
     <div id="detailBody"></div>
   </dialog>
 
-  <dialog id="usageDialog">
+  <dialog id="usageDialog" class="form-dialog">
     <form id="usageForm">
       <div class="dialog-head">
         <div>
-          <p class="eyebrow" id="usageEyebrow">登記使用</p>
-          <h2>登記使用</h2>
+          <p class="eyebrow" id="usageEyebrow">現場使用登記</p>
+          <h2>現場使用登記</h2>
         </div>
         <button type="button" class="icon-btn" data-close="usageDialog" aria-label="關閉">×</button>
       </div>
+      <div class="dialog-scroll">
+      <p class="muted">物品未借離原存放地點，只記錄一次使用。若物品要被帶走，請改用「辦理借出」。</p>
       <input type="hidden" id="usagePropertyId" />
       <div class="field">
         <label for="usageUser">使用人</label>
@@ -345,7 +353,8 @@
         <label for="usageNote">備註</label>
         <textarea id="usageNote" rows="3" maxlength="200"></textarea>
       </div>
-      <div class="dialog-actions">
+      </div>
+      <div class="dialog-actions sticky">
         <button type="button" class="secondary" data-close="usageDialog">取消</button>
         <button type="submit" class="primary">儲存紀錄</button>
       </div>
@@ -524,6 +533,7 @@
         <button type="button" class="icon-btn" data-close="checkoutDialog" aria-label="關閉">×</button>
       </div>
       <div class="dialog-scroll">
+        <p class="muted">辦理借出後，物品會離開原存放地點，必須再辦理歸還。現場使用請改按「現場使用登記」。</p>
         <div class="field">
           <label for="checkoutPropertyId">財產編號 <span class="req">必填</span></label>
           <input id="checkoutPropertyId" required readonly />

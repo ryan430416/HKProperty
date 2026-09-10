@@ -13,7 +13,7 @@ import {
   auditStatusClass,
   availabilityClass
 } from './format.js';
-import { closeDialog, fillSelect, openDialog, setLoading, toast } from './ui.js';
+import { bindDialogBehavior, closeDialog, fillSelect, isSwitchingDialogs, openExclusiveDialog, setLoading, toast } from './ui.js';
 import { parseScanPayload, startCameraScan } from './scanner.js';
 import {
   AVAILABILITY,
@@ -28,6 +28,7 @@ import {
 } from '../services/inventoryService.js';
 import { addUsage, listUsage } from '../services/usageService.js';
 import { addAudit, confirmLocationUpdate, listAudits, listLocationChanges } from '../services/auditService.js';
+import { runLoanLifecycleTest } from '../services/loanFlowTest.js';
 import {
   RETURN_RESULT,
   checkin,
@@ -68,7 +69,8 @@ const state = {
   historyTab: 'usage',
   historyId: '',
   pendingImage: '',
-  pendingCheckout: null
+  pendingCheckout: null,
+  returnToDetailId: null
 };
 
 function $(id) {
@@ -611,14 +613,19 @@ function openItem(propertyId) {
     </dl>
     <div class="action-grid">
       ${loanActionButtons(item)}
-      <button type="button" class="secondary" data-usage="${esc(item.propertyId)}">登記使用</button>
+      <button type="button" class="secondary" data-usage="${esc(item.propertyId)}">現場使用登記</button>
       <button type="button" class="primary" data-audit="${esc(item.propertyId)}">執行盤點</button>
       <button type="button" class="secondary" data-location="${esc(item.propertyId)}">更新位置</button>
       <button type="button" class="secondary" data-image="${esc(item.propertyId)}">上傳圖片</button>
       <button type="button" class="secondary" data-history="${esc(item.propertyId)}">查看紀錄</button>
     </div>
+    <div class="action-hint">
+      <p><strong>辦理借出：</strong>物品會離開原存放地點，需要辦理歸還。</p>
+      <p><strong>現場使用登記：</strong>物品未借離，只記錄一次使用。</p>
+    </div>
   `;
-  openDialog('detailDialog');
+  state.returnToDetailId = item.propertyId;
+  openExclusiveDialog('detailDialog');
 }
 
 function openUsage(propertyId) {
@@ -631,7 +638,8 @@ function openUsage(propertyId) {
   $('usageAt').value = toInputDateTime();
   $('usagePurpose').value = '';
   $('usageNote').value = '';
-  openDialog('usageDialog');
+  state.returnToDetailId = item.propertyId;
+  openExclusiveDialog('usageDialog');
 }
 
 function openAudit(propertyId) {
@@ -645,7 +653,8 @@ function openAudit(propertyId) {
   $('auditAt').value = toInputDateTime();
   $('auditNote').value = '';
   document.querySelectorAll('input[name="auditResult"]').forEach((el) => { el.checked = false; });
-  openDialog('auditDialog');
+  state.returnToDetailId = item.propertyId;
+  openExclusiveDialog('auditDialog');
 }
 
 function openLocation(propertyId) {
@@ -657,7 +666,8 @@ function openLocation(propertyId) {
   $('locationNext').value = '';
   $('locationOperator').value = '管理者';
   $('locationReason').value = '';
-  openDialog('locationDialog');
+  state.returnToDetailId = item.propertyId;
+  openExclusiveDialog('locationDialog');
 }
 
 function openImage(propertyId) {
@@ -670,7 +680,8 @@ function openImage(propertyId) {
   $('imageFile').value = '';
   $('imageError').textContent = '';
   $('imageSaveBtn').disabled = true;
-  openDialog('imageDialog');
+  state.returnToDetailId = item.propertyId;
+  openExclusiveDialog('imageDialog');
 }
 
 function historyListHTML(rows, emptyText, line) {
@@ -721,7 +732,8 @@ function openHistory(propertyId) {
     btn.classList.toggle('active', btn.dataset.historyTab === 'usage');
   });
   renderHistory();
-  openDialog('historyDialog');
+  state.returnToDetailId = item.propertyId;
+  openExclusiveDialog('historyDialog');
 }
 
 function readCheckoutForm() {
@@ -765,7 +777,8 @@ function openCheckout(propertyId) {
   $('checkoutOperator').value = '管理者';
   $('checkoutCondition').value = '';
   $('checkoutNote').value = '';
-  openDialog('checkoutDialog');
+  state.returnToDetailId = item.propertyId;
+  openExclusiveDialog('checkoutDialog');
 }
 
 function openCheckin(propertyId) {
@@ -792,7 +805,8 @@ function openCheckin(propertyId) {
   $('checkinLocation').value = item.location || '';
   $('checkinNote').value = '';
   document.querySelectorAll('input[name="checkinResult"]').forEach((el) => { el.checked = false; });
-  openDialog('checkinDialog');
+  state.returnToDetailId = item.propertyId;
+  openExclusiveDialog('checkinDialog');
 }
 
 function openLoanDetail(loanId) {
@@ -822,7 +836,7 @@ function openLoanDetail(loanId) {
     ['歸還位置', loan.returnLocation || '—'],
     ['備註', displayValue(loan.note)]
   ].map(([k, v]) => `<div class="kv"><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`;
-  openDialog('loanDetailDialog');
+  openExclusiveDialog('loanDetailDialog');
 }
 
 function askLocationConfirm(propertyId, fromLocation, toLocation) {
@@ -830,13 +844,13 @@ function askLocationConfirm(propertyId, fromLocation, toLocation) {
   $('confirmFrom').value = fromLocation;
   $('confirmTo').value = toLocation;
   $('confirmText').textContent = `系統登記位置為 ${fromLocation}，本次實際位置為 ${toLocation}。原位置不會自動覆蓋，是否確認更新？`;
-  openDialog('confirmDialog');
+  openExclusiveDialog('confirmDialog');
 }
 
 function openScan() {
   $('scanCode').value = '';
   $('scanError').textContent = '';
-  openDialog('scanDialog');
+  openExclusiveDialog('scanDialog');
 }
 
 function lookupScan(raw) {
@@ -857,8 +871,26 @@ function lookupScan(raw) {
 
 function afterMutation(propertyId, message) {
   render();
-  if (propertyId) openItem(propertyId);
+  if (propertyId) {
+    state.returnToDetailId = propertyId;
+    openItem(propertyId);
+  }
   toast(message);
+}
+
+function restoreDetailAfterClose(closedId) {
+  if (isSwitchingDialogs()) return;
+  if (closedId === 'detailDialog' || closedId === 'scanDialog' || closedId === 'loanDetailDialog') return;
+  if (closedId === 'checkoutConfirmDialog') {
+    if (state.pendingCheckout) openExclusiveDialog('checkoutDialog');
+    else if (state.returnToDetailId) openItem(state.returnToDetailId);
+    return;
+  }
+  const shouldRestore = [
+    'checkoutDialog', 'checkinDialog', 'usageDialog', 'auditDialog',
+    'locationDialog', 'imageDialog', 'historyDialog', 'confirmDialog'
+  ].includes(closedId);
+  if (shouldRestore && state.returnToDetailId) openItem(state.returnToDetailId);
 }
 
 function downloadCsv() {
@@ -876,6 +908,7 @@ function downloadCsv() {
 }
 
 function bindEvents() {
+  bindDialogBehavior(restoreDetailAfterClose);
   document.addEventListener('click', (event) => {
     const closer = event.target.closest('[data-close]');
     if (closer) {
@@ -1064,7 +1097,7 @@ function bindEvents() {
         ['用途', data.purpose],
         ['經手人', data.checkoutOperator]
       ].map(([k, v]) => `<div><strong>${esc(k)}：</strong>${esc(v)}</div>`).join('');
-      openDialog('checkoutConfirmDialog');
+      openExclusiveDialog('checkoutConfirmDialog');
     } catch (error) {
       toast(error.message || '請完整填寫借出資料', 'error');
     }
@@ -1076,8 +1109,8 @@ function bindEvents() {
       if (!state.pendingCheckout) throw new Error('找不到待確認的借出資料');
       const { item } = checkout(state.pendingCheckout);
       state.pendingCheckout = null;
-      closeDialog('checkoutConfirmDialog');
-      closeDialog('checkoutDialog');
+      closeDialog('checkoutConfirmDialog', { silent: true });
+      closeDialog('checkoutDialog', { silent: true });
       afterMutation(item.propertyId, '已完成借出，使用次數已更新');
     } catch (error) {
       toast(error.message || '借出失敗', 'error');
@@ -1087,6 +1120,7 @@ function bindEvents() {
   $('checkinForm').addEventListener('submit', (event) => {
     event.preventDefault();
     try {
+      const result = document.querySelector('input[name="checkinResult"]:checked')?.value;
       const outcome = checkin({
         propertyId: $('checkinPropertyId').value,
         returnedAt: $('checkinAt').value,
@@ -1096,7 +1130,7 @@ function bindEvents() {
         returnResult: result,
         note: $('checkinNote').value
       });
-      closeDialog('checkinDialog');
+      closeDialog('checkinDialog', { silent: true });
       let message = '已完成歸還';
       if (result === RETURN_RESULT.REPAIR) message = '已歸還並改為維修中';
       if (result === RETURN_RESULT.LOST) message = '已登記遺失，財產狀態改為異常';
@@ -1119,10 +1153,10 @@ function bindEvents() {
         purpose: $('usagePurpose').value,
         note: $('usageNote').value
       });
-      closeDialog('usageDialog');
-      afterMutation(item.propertyId, '已登記使用，使用次數已更新');
+      closeDialog('usageDialog', { silent: true });
+      afterMutation(item.propertyId, '已完成現場使用登記，使用次數已更新');
     } catch (error) {
-      toast(error.message || '登記使用失敗', 'error');
+      toast(error.message || '現場使用登記失敗', 'error');
     }
   });
 
@@ -1139,7 +1173,7 @@ function bindEvents() {
         auditedAt: $('auditAt').value,
         note: $('auditNote').value
       });
-      closeDialog('auditDialog');
+      closeDialog('auditDialog', { silent: true });
       afterMutation(outcome.item.propertyId, '盤點結果已儲存');
       if (outcome.needsLocationConfirm) {
         askLocationConfirm(outcome.item.propertyId, outcome.entry.registeredLocation, outcome.entry.actualLocation);
@@ -1159,7 +1193,7 @@ function bindEvents() {
         operator: $('locationOperator').value,
         reason: $('locationReason').value
       });
-      closeDialog('locationDialog');
+      closeDialog('locationDialog', { silent: true });
       afterMutation(item.propertyId, '位置已更新，並已建立異動紀錄');
     } catch (error) {
       toast(error.message || '位置更新失敗', 'error');
@@ -1176,7 +1210,7 @@ function bindEvents() {
         operator: '管理者',
         reason: '盤點後確認更新位置'
       });
-      closeDialog('confirmDialog');
+      closeDialog('confirmDialog', { silent: true });
       afterMutation($('confirmPropertyId').value, '已確認更新位置');
     } catch (error) {
       toast(error.message || '位置更新失敗', 'error');
@@ -1224,7 +1258,7 @@ function bindEvents() {
     }
     try {
       const item = saveImage($('imagePropertyId').value, state.pendingImage);
-      closeDialog('imageDialog');
+      closeDialog('imageDialog', { silent: true });
       afterMutation(item.propertyId, '圖片已儲存');
     } catch (error) {
       toast(error.message || '圖片儲存失敗', 'error');
@@ -1241,6 +1275,24 @@ function bindEvents() {
     } catch (error) {
       $('scanError').textContent = error.message;
       toast(error.message, 'error');
+    }
+  });
+
+  $('runLoanTestBtn').addEventListener('click', () => {
+    const box = $('loanTestResult');
+    box.hidden = false;
+    box.innerHTML = '<p class="muted">測試進行中…</p>';
+    try {
+      const result = runLoanLifecycleTest();
+      render();
+      box.innerHTML = `
+        <p><strong>${result.ok ? '測試通過' : '測試未通過'}</strong>${result.propertyId ? ` · 測試財產 ${esc(result.propertyId)}` : ''}</p>
+        ${result.steps.map((step) => `<div class="feed-item"><strong>${esc(step.name)}</strong><div class="muted">${esc(step.detail || '')}</div></div>`).join('')}
+      `;
+      toast(result.ok ? '借出流程測試通過，測試資料已清除' : (result.error || '借出流程測試未通過'), result.ok ? 'ok' : 'error');
+    } catch (error) {
+      box.innerHTML = `<p class="muted">${esc(error.message)}</p>`;
+      toast(error.message || '測試失敗', 'error');
     }
   });
 

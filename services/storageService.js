@@ -69,3 +69,18 @@ export function migrateLegacyStorage() {
   if (!localStorage.getItem(STORAGE_KEYS.loans)) writeStore(STORAGE_KEYS.loans, []);
   if (!localStorage.getItem(STORAGE_KEYS.images)) writeStore(STORAGE_KEYS.images, {});
 }
+
+export function restoreAppStorage(snap) {
+  for (const key of Object.values(STORAGE_KEYS)) {
+    if (snap[key] == null) localStorage.removeItem(key);
+    else localStorage.setItem(key, snap[key]);
+  }
+}
+
+export function snapshotAppStorage() {
+  const snap = {};
+  for (const key of Object.values(STORAGE_KEYS)) {
+    snap[key] = localStorage.getItem(key);
+  }
+  return snap;
+}
