@@ -11,17 +11,38 @@
 
 ## 1. Windows 本機啟動
 
-1. 下載 [PocketBase](https://github.com/pocketbase/pocketbase/releases)（建議 0.23+）。
+1. 下載 [PocketBase](https://github.com/pocketbase/pocketbase/releases)（建議 0.23+；目前專案曾以 0.40.x 驗證）。
 2. 將 `pocketbase.exe` 放在專案根目錄（已 gitignore）。
-3. 在專案根目錄執行：
+3. 若 `8090` 已被其他專案占用，改用 `8091`：
 
 ```powershell
-.\pocketbase.exe serve --http=127.0.0.1:8090
+.\pocketbase.exe serve --http=127.0.0.1:8091
 ```
 
-開啟 http://127.0.0.1:8090/_/ 建立第一個 Superuser。
+開啟對應網址後台（例如 http://127.0.0.1:8091/_/）。
+
+建議在 `.env.local`（優先於 `.env`，且勿提交）寫入本機專用實例：
+
+```env
+VITE_POCKETBASE_URL=http://127.0.0.1:8091
+POCKETBASE_URL=http://127.0.0.1:8091
+POCKETBASE_ADMIN_EMAIL=admin@hkproperty.local
+POCKETBASE_ADMIN_PASSWORD=你的密碼
+```
+
+建立 Superuser：
+
+```powershell
+.\pocketbase.exe superuser upsert admin@hkproperty.local 你的密碼
+```
 
 `pb_hooks` 與 `pb_migrations` 會從此工作目錄載入。
+
+驗證集合與 CORS：
+
+```powershell
+node scripts/verify-local-pb.mjs
+```
 
 ## 2. 環境變數
 

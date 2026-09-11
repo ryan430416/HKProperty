@@ -1,0 +1,245 @@
+/// <reference path="../pb_data/types.d.ts" />
+migrate((app) => {
+  const collection = new Collection({
+    "createRule": null,
+    "deleteRule": "@request.auth.id != \"\" && @request.auth.collectionName = \"users\" && @request.auth.role = \"admin\"",
+    "fields": [
+      {
+        "autogeneratePattern": "[a-z0-9]{15}",
+        "help": "",
+        "hidden": false,
+        "id": "text3208210256",
+        "max": 15,
+        "min": 15,
+        "name": "id",
+        "pattern": "^[a-z0-9]+$",
+        "presentable": false,
+        "primaryKey": true,
+        "required": true,
+        "system": true,
+        "type": "text"
+      },
+      {
+        "autogeneratePattern": "",
+        "help": "",
+        "hidden": false,
+        "id": "text3424587308",
+        "max": 0,
+        "min": 0,
+        "name": "usage_number",
+        "pattern": "",
+        "presentable": false,
+        "primaryKey": false,
+        "required": true,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "cascadeDelete": false,
+        "collectionId": "pbc_1321337024",
+        "help": "",
+        "hidden": false,
+        "id": "relation45046364",
+        "maxSelect": 1,
+        "minSelect": 0,
+        "name": "asset",
+        "presentable": false,
+        "required": true,
+        "system": false,
+        "type": "relation"
+      },
+      {
+        "cascadeDelete": false,
+        "collectionId": "_pb_users_auth_",
+        "help": "",
+        "hidden": false,
+        "id": "relation2375276105",
+        "maxSelect": 1,
+        "minSelect": 0,
+        "name": "user",
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "type": "relation"
+      },
+      {
+        "cascadeDelete": false,
+        "collectionId": "pbc_3846869556",
+        "help": "",
+        "hidden": false,
+        "id": "relation3318942979",
+        "maxSelect": 1,
+        "minSelect": 0,
+        "name": "loan",
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "type": "relation"
+      },
+      {
+        "cascadeDelete": false,
+        "collectionId": "pbc_322407982",
+        "help": "",
+        "hidden": false,
+        "id": "relation1120422229",
+        "maxSelect": 1,
+        "minSelect": 0,
+        "name": "reservation",
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "type": "relation"
+      },
+      {
+        "help": "",
+        "hidden": false,
+        "id": "select661931314",
+        "maxSelect": 1,
+        "name": "usage_type",
+        "presentable": false,
+        "required": true,
+        "system": false,
+        "type": "select",
+        "values": [
+          "checkout",
+          "on_site",
+          "reservation_checkout",
+          "admin_record"
+        ]
+      },
+      {
+        "autogeneratePattern": "",
+        "help": "",
+        "hidden": false,
+        "id": "text614609615",
+        "max": 0,
+        "min": 0,
+        "name": "user_name",
+        "pattern": "",
+        "presentable": false,
+        "primaryKey": false,
+        "required": true,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "autogeneratePattern": "",
+        "help": "",
+        "hidden": false,
+        "id": "text3441287562",
+        "max": 0,
+        "min": 0,
+        "name": "department",
+        "pattern": "",
+        "presentable": false,
+        "primaryKey": false,
+        "required": false,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "autogeneratePattern": "",
+        "help": "",
+        "hidden": false,
+        "id": "text3095901163",
+        "max": 0,
+        "min": 0,
+        "name": "purpose",
+        "pattern": "",
+        "presentable": false,
+        "primaryKey": false,
+        "required": true,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "help": "",
+        "hidden": false,
+        "id": "date124928442",
+        "max": "",
+        "min": "",
+        "name": "used_at",
+        "presentable": false,
+        "required": true,
+        "system": false,
+        "type": "date"
+      },
+      {
+        "autogeneratePattern": "",
+        "help": "",
+        "hidden": false,
+        "id": "text1587448267",
+        "max": 0,
+        "min": 0,
+        "name": "location",
+        "pattern": "",
+        "presentable": false,
+        "primaryKey": false,
+        "required": false,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "cascadeDelete": false,
+        "collectionId": "_pb_users_auth_",
+        "help": "",
+        "hidden": false,
+        "id": "relation2194941835",
+        "maxSelect": 1,
+        "minSelect": 0,
+        "name": "recorded_by",
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "type": "relation"
+      },
+      {
+        "autogeneratePattern": "",
+        "help": "",
+        "hidden": false,
+        "id": "text2144452935",
+        "max": 0,
+        "min": 0,
+        "name": "idempotency_key",
+        "pattern": "",
+        "presentable": false,
+        "primaryKey": false,
+        "required": true,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "autogeneratePattern": "",
+        "help": "",
+        "hidden": false,
+        "id": "text3485334036",
+        "max": 0,
+        "min": 0,
+        "name": "note",
+        "pattern": "",
+        "presentable": false,
+        "primaryKey": false,
+        "required": false,
+        "system": false,
+        "type": "text"
+      }
+    ],
+    "id": "pbc_724374312",
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_usage_records_number` ON `usage_records` (`usage_number`)",
+      "CREATE UNIQUE INDEX `idx_usage_records_idem` ON `usage_records` (`idempotency_key`)"
+    ],
+    "listRule": "@request.auth.id != \"\" && @request.auth.collectionName = \"users\" && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\") || (@request.auth.id != \"\" && @request.auth.collectionName = \"users\" && user = @request.auth.id)",
+    "name": "usage_records",
+    "system": false,
+    "type": "base",
+    "updateRule": null,
+    "viewRule": "@request.auth.id != \"\" && @request.auth.collectionName = \"users\" && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\") || (@request.auth.id != \"\" && @request.auth.collectionName = \"users\" && user = @request.auth.id)"
+  });
+
+  return app.save(collection);
+}, (app) => {
+  const collection = app.findCollectionByNameOrId("pbc_724374312");
+
+  return app.delete(collection);
+})
