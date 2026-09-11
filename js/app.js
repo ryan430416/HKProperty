@@ -75,6 +75,13 @@ import {
   verifyEmailOtp
 } from '../services/authService.js';
 import { clearLegacyLocalData, detectLegacyLocalData } from '../services/legacyLocalData.js';
+import {
+  backendStatusLabel,
+  getBackendStatus,
+  markDemoBackend,
+  probePocketBase,
+  requirePocketBaseReady
+} from '../services/backendStatus.js';
 
 const PAGE_META = {
   dashboard: ['財產管理', '系統總覽'],
@@ -113,15 +120,34 @@ function imageOf(item) {
 }
 
 async function refreshData() {
+  if (!isDemoMode()) requirePocketBaseReady();
   await Promise.all([
     loadCatalog(),
     loadLoans(),
     loadSettings(),
-    loadUsage().catch(() => []),
+    loadUsage(),
     loadAudits(),
     loadLocationHistory()
   ]);
   refreshOverdueStatus();
+}
+
+function updateBackendStatusUi() {
+  const status = getBackendStatus();
+  const label = backendStatusLabel(status);
+  const detail = status.message ? `${label}｜${status.message}` : label;
+  const banner = $('backendStatusBanner');
+  const text = $('backendStatusText');
+  if (banner && text) {
+    banner.dataset.mode = status.mode;
+    text.textContent = detail;
+  }
+  const authStatus = $('authBackendStatus');
+  if (authStatus) {
+    authStatus.dataset.mode = status.mode;
+    authStatus.textContent = detail;
+  }
+  if ($('demoBanner')) $('demoBanner').hidden = status.mode !== 'demo';
 }
 
 function applyRoleNav() {
@@ -138,12 +164,12 @@ function applyRoleNav() {
   $('userRole').textContent = demo ? `${roleLabel(profile?.role)}（測試）` : roleLabel(profile?.role);
   $('userAvatar').textContent = (profile?.display_name || '用').slice(0, 1);
   $('logoutBtn').hidden = !profile;
-  if ($('demoBanner')) $('demoBanner').hidden = !demo;
   if ($('sideFoot')) {
     $('sideFoot').textContent = demo
       ? '測試模式：資料只存在此瀏覽器，關閉分頁後會消失'
       : '資料儲存在雲端資料庫，可在不同裝置同步';
   }
+  updateBackendStatusUi();
 }
 
 function showAuthGate(on) {
@@ -1510,6 +1536,8 @@ function bindEvents() {
   async function startDemo(role) {
     try {
       await enterDemoSession(role);
+      markDemoBackend();
+      updateBackendStatusUi();
       toast(role === 'borrower' ? '已進入測試（借用人）' : `已進入測試（${role === 'admin' ? '管理者' : '經辦'}）`);
       await bootApp();
     } catch (error) {
@@ -1652,14 +1680,20 @@ function showLoadError(message) {
   setLoading(false);
   $('main').hidden = false;
   $('loadError').hidden = false;
-  $('loadErrorText').textContent = message;
+  const status = getBackendStatus();
+  const prefix = status.mode === 'failed' || status.mode === 'unset'
+    ? `PocketBase 尚未連線。${status.message ? `${status.message}。` : ''}`
+    : '';
+  $('loadErrorText').textContent = `${prefix}${message || '無法載入資料'}`.trim();
   document.querySelectorAll('.view').forEach((el) => { el.hidden = true; });
+  updateBackendStatusUi();
 }
 
 async function bootApp() {
   if (!getProfile()) {
     showAuthGate(true);
     setLoading(false);
+    updateBackendStatusUi();
     return;
   }
   applyRoleNav();
@@ -1667,6 +1701,16 @@ async function bootApp() {
   $('loadError').hidden = true;
   setLoading(true, '正在載入財產清冊…');
   try {
+    if (isDemoMode()) {
+      markDemoBackend();
+    } else {
+      const status = await probePocketBase();
+      updateBackendStatusUi();
+      if (status.mode !== 'connected') {
+        throw new Error(status.message || 'PocketBase 尚未連線');
+      }
+    }
+    updateBackendStatusUi();
     await refreshData();
     setLoading(false);
     applyRoleNav();
@@ -1708,11 +1752,14 @@ async function init() {
     sessionStorage.setItem('hkp-pending-asset', JSON.stringify(pendingDeep));
   }
   setLoading(true, '檢查登入狀態…');
+  await probePocketBase();
+  updateBackendStatusUi();
   await initAuth(async (profile) => {
     if (profile) await bootApp();
     else {
       setLoading(false);
       showAuthGate(true);
+      updateBackendStatusUi();
     }
   });
 }

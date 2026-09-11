@@ -56,7 +56,7 @@ export async function loadReservations() {
 }
 
 export function listReservations(propertyId) {
-  const list = cache.slice();
+  const list = Array.isArray(cache) ? cache.slice() : [];
   if (!propertyId) return list;
   return list.filter((row) => row.propertyId === propertyId || row.assetId === propertyId);
 }

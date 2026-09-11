@@ -212,7 +212,7 @@ export async function listProfiles() {
   const client = requireClient();
   try {
     const data = await client.collection(PB.users).getFullList({ sort: '-created' });
-    return data.map(mapProfile);
+    return Array.isArray(data) ? data.map(mapProfile) : [];
   } catch (error) {
     throw new Error(pbMessage(error, '無法載入使用者'));
   }

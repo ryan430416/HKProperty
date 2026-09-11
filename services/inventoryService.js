@@ -111,7 +111,8 @@ export async function loadCatalog() {
       options.fields = BASIC_FIELDS;
     }
     const data = await client.collection(PB.assets).getFullList(options);
-    cache = (data || []).map(mapAsset);
+    const rows = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+    cache = rows.map(mapAsset);
     loaded = true;
     return listItems();
   } catch (error) {
@@ -124,10 +125,11 @@ export function isCatalogLoaded() {
 }
 
 export function listItems() {
-  return cache.slice();
+  return Array.isArray(cache) ? cache.slice() : [];
 }
 
 export function getItem(propertyId) {
+  if (!Array.isArray(cache)) return null;
   const id = String(propertyId ?? '').trim();
   return cache.find((item) => item.propertyId === id || item.id === id) || null;
 }
@@ -143,23 +145,28 @@ export function getFilterOptions() {
   return {
     locations: unique('location'),
     departments: unique('department'),
-    statuses: unique('availabilityStatus')
+    statuses: unique('status'),
+    auditStatuses: unique('auditStatus'),
+    availabilities: unique('availabilityStatus')
   };
 }
 
-export function locationRanking() {
+export function locationRanking(limit = 0) {
   const map = new Map();
   for (const item of listItems()) {
     const key = item.location || '未設定';
     map.set(key, (map.get(key) || 0) + 1);
   }
-  return [...map.entries()]
+  const rows = [...map.entries()]
     .map(([location, count]) => ({ location, count }))
     .sort((a, b) => b.count - a.count || a.location.localeCompare(b.location, 'zh-Hant'));
+  if (limit > 0) return rows.slice(0, limit);
+  return rows;
 }
 
 export function getStats() {
   const items = listItems();
+  const auditPending = items.filter((item) => item.auditStatus === AUDIT_STATUS.PENDING).length;
   return {
     total: items.length,
     available: items.filter((item) => item.availabilityStatus === AVAILABILITY.AVAILABLE).length,
@@ -168,7 +175,8 @@ export function getStats() {
     checkedOut: items.filter((item) => item.availabilityStatus === AVAILABILITY.CHECKED_OUT).length,
     overdue: items.filter((item) => item.availabilityStatus === AVAILABILITY.OVERDUE).length,
     maintenance: items.filter((item) => item.availabilityStatus === AVAILABILITY.MAINTENANCE).length,
-    lost: items.filter((item) => item.availabilityStatus === AVAILABILITY.LOST).length
+    lost: items.filter((item) => item.availabilityStatus === AVAILABILITY.LOST).length,
+    pending: auditPending
   };
 }
 

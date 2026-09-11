@@ -66,13 +66,13 @@ export async function loadLocationHistory() {
 }
 
 export function listAudits(propertyId) {
-  const logs = auditCache.slice();
+  const logs = Array.isArray(auditCache) ? auditCache.slice() : [];
   if (!propertyId) return logs;
   return logs.filter((log) => log.propertyId === propertyId || log.assetId === propertyId);
 }
 
 export function listLocationChanges(propertyId) {
-  const logs = locationCache.slice();
+  const logs = Array.isArray(locationCache) ? locationCache.slice() : [];
   if (!propertyId) return logs;
   return logs.filter((log) => log.propertyId === propertyId || log.assetId === propertyId);
 }

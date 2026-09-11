@@ -161,7 +161,7 @@ export async function loadLoans() {
 }
 
 export function listLoans(propertyId) {
-  const list = cache.slice();
+  const list = Array.isArray(cache) ? cache.slice() : [];
   if (!propertyId) return list;
   return list.filter((loan) => loan.propertyId === propertyId || loan.assetId === propertyId);
 }

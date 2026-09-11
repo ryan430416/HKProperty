@@ -33,7 +33,7 @@ export async function loadUsage() {
 }
 
 export function listUsage(propertyId) {
-  const logs = cache.slice();
+  const logs = Array.isArray(cache) ? cache.slice() : [];
   if (!propertyId) return logs;
   return logs.filter((log) => log.propertyId === propertyId || log.assetId === propertyId);
 }

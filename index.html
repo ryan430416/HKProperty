@@ -40,7 +40,10 @@
     </aside>
 
     <div class="shell">
-      <div id="demoBanner" class="demo-banner" hidden>測試模式：資料只存在此瀏覽器，權限未鎖定，方便先測功能。</div>
+      <div id="backendStatusBanner" class="backend-status" data-mode="unset" role="status" aria-live="polite">
+        <span id="backendStatusText">正在檢查後端連線…</span>
+      </div>
+      <div id="demoBanner" class="demo-banner" hidden>測試模式：資料只存在此瀏覽器，不會寫入 PocketBase。</div>
       <header class="topbar">
         <button type="button" class="icon-btn menu-btn" id="menuBtn" aria-label="開啟選單" aria-controls="sidebar">
           <span></span><span></span><span></span>
@@ -80,6 +83,7 @@
             <p class="eyebrow">測試模式</p>
             <h2>先測功能，不必正式登入</h2>
             <p class="muted">資料只存在這個瀏覽器分頁。預設以「借用人」進入；若要看經辦或管理畫面再另外選。</p>
+            <p id="authBackendStatus" class="backend-status-inline" data-mode="unset">正在檢查後端連線…</p>
             <div class="demo-login">
               <button type="button" class="primary" id="demoBorrowerBtn">以借用人進入測試</button>
               <div class="demo-login-row">

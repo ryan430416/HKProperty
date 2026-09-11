@@ -29,7 +29,10 @@ export function asArray(value) {
 export async function getFullList(collection, options = {}) {
   const client = requireClient();
   try {
-    return await client.collection(collection).getFullList(options);
+    const data = await client.collection(collection).getFullList(options);
+    if (Array.isArray(data)) return data;
+    if (data && Array.isArray(data.items)) return data.items;
+    return [];
   } catch (error) {
     throw new Error(pbMessage(error, `無法載入 ${collection}`));
   }

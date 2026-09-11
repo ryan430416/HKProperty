@@ -207,6 +207,44 @@ button { cursor: pointer; }
 }
 .login-card { width: min(440px, 100%); }
 .login-card h2 { margin: 6px 0 8px; }
+.backend-status {
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  background: #eef3f8;
+  color: var(--navy);
+}
+.backend-status[data-mode="connected"] {
+  background: #e7f4ea;
+  color: #1f5b32;
+  border-bottom-color: #c7e3cf;
+}
+.backend-status[data-mode="demo"] {
+  background: #f4ead0;
+  color: #5c4813;
+  border-bottom-color: #e4d5a5;
+}
+.backend-status[data-mode="failed"],
+.backend-status[data-mode="unset"] {
+  background: #f8e8e6;
+  color: #7a2e26;
+  border-bottom-color: #e7c4bf;
+}
+.backend-status-inline {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  background: #eef3f8;
+  color: var(--navy);
+}
+.backend-status-inline[data-mode="connected"] { background: #e7f4ea; color: #1f5b32; }
+.backend-status-inline[data-mode="demo"] { background: #f4ead0; color: #5c4813; }
+.backend-status-inline[data-mode="failed"],
+.backend-status-inline[data-mode="unset"] { background: #f8e8e6; color: #7a2e26; }
 .demo-banner {
   background: #f4ead0;
   color: #5c4813;

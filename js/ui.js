@@ -118,6 +118,10 @@ export function setLoading(on, text = '資料載入中…') {
 }
 
 export function fillSelect(select, blankLabel, values, current = '') {
+  if (!select) return;
+  if (!Array.isArray(values)) {
+    throw new Error(`fillSelect 需要陣列，實際收到：${values === undefined ? 'undefined' : typeof values}（label=${blankLabel}）`);
+  }
   const options = [`<option value="">${blankLabel}</option>`]
     .concat(values.map((value) => `<option value="${escapeAttr(value)}">${escapeAttr(value)}</option>`));
   select.innerHTML = options.join('');

@@ -119,10 +119,25 @@ function blankData() {
 
 function ensureData() {
   const current = readJson(DATA_KEY);
-  if (current?.assets?.length) return current;
-  const data = blankData();
-  sessionStorage.setItem(DATA_KEY, JSON.stringify(data));
-  return data;
+  const blank = blankData();
+  if (!current || !Array.isArray(current.assets) || !current.assets.length) {
+    sessionStorage.setItem(DATA_KEY, JSON.stringify(blank));
+    return blank;
+  }
+  const normalized = {
+    assets: Array.isArray(current.assets) ? current.assets : blank.assets,
+    loans: Array.isArray(current.loans) ? current.loans : [],
+    usage: Array.isArray(current.usage) ? current.usage : [],
+    audits: Array.isArray(current.audits) ? current.audits : [],
+    locations: Array.isArray(current.locations) ? current.locations : [],
+    logs: Array.isArray(current.logs) ? current.logs : [],
+    users: Array.isArray(current.users) && current.users.length ? current.users : blank.users,
+    settings: current.settings && typeof current.settings === 'object'
+      ? { ...blank.settings, ...current.settings }
+      : blank.settings
+  };
+  sessionStorage.setItem(DATA_KEY, JSON.stringify(normalized));
+  return normalized;
 }
 
 export function getDemoData() {
@@ -162,35 +177,36 @@ function nextLoanNumber(data) {
 }
 
 export function demoAssets() {
-  return getDemoData().assets.slice();
+  return Array.isArray(getDemoData().assets) ? getDemoData().assets.slice() : [];
 }
 
 export function demoLoans() {
-  return getDemoData().loans.slice();
+  return Array.isArray(getDemoData().loans) ? getDemoData().loans.slice() : [];
 }
 
 export function demoUsage() {
-  return getDemoData().usage.slice();
+  return Array.isArray(getDemoData().usage) ? getDemoData().usage.slice() : [];
 }
 
 export function demoAudits() {
-  return getDemoData().audits.slice();
+  return Array.isArray(getDemoData().audits) ? getDemoData().audits.slice() : [];
 }
 
 export function demoLocations() {
-  return getDemoData().locations.slice();
+  return Array.isArray(getDemoData().locations) ? getDemoData().locations.slice() : [];
 }
 
 export function demoLogs() {
-  return getDemoData().logs.slice();
+  return Array.isArray(getDemoData().logs) ? getDemoData().logs.slice() : [];
 }
 
 export function demoSettings() {
-  return { ...getDemoData().settings };
+  return { ...blankData().settings, ...(getDemoData().settings || {}) };
 }
 
 export function demoUsers() {
-  return getDemoData().users.map((user) => ({ ...user }));
+  const users = getDemoData().users;
+  return Array.isArray(users) ? users.map((user) => ({ ...user })) : [];
 }
 
 export function demoSaveSettings(patch) {
