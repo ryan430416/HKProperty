@@ -15,7 +15,7 @@ import {
 } from './format.js';
 import { bindConfirmDialog, bindDialogBehavior, closeDialog, confirmAction, fillSelect, isSwitchingDialogs, openExclusiveDialog, setLoading, toast } from './ui.js';
 import { bindSelfService, openSelfMode, showHome } from './selfService.js';
-import { parseScanPayload, readAssetDeepLink, startCameraScan } from './scanner.js';
+import { parseScanPayload, readAssetDeepLink, startCameraScan, stopCameraScan } from './scanner.js';
 import {
   AVAILABILITY,
   findByPropertyId,
@@ -74,10 +74,20 @@ import {
   updateMyProfile,
   verifyEmailOtp
 } from '../services/authService.js';
+import {
+  approveReservation,
+  cancelReservation,
+  createReservation,
+  listManageReservations,
+  listMyReservations,
+  loadReservations,
+  rejectReservation
+} from '../services/reservationService.js';
 import { clearLegacyLocalData, detectLegacyLocalData } from '../services/legacyLocalData.js';
 import {
   backendStatusLabel,
   getBackendStatus,
+  isFormalPocketBaseMode,
   markDemoBackend,
   probePocketBase,
   requirePocketBaseReady
@@ -89,6 +99,8 @@ const PAGE_META = {
   inventory: ['財產查詢', '財產清冊'],
   loans: ['借用作業', '借出管理'],
   loanHistory: ['借用作業', '借用紀錄'],
+  myReservations: ['借用作業', '我的預借'],
+  reservations: ['借用作業', '預借管理'],
   audit: ['盤點作業', '盤點作業'],
   usage: ['使用管理', '使用紀錄'],
   locations: ['位置資料', '位置管理'],
@@ -127,7 +139,11 @@ async function refreshData() {
     loadSettings(),
     loadUsage(),
     loadAudits(),
-    loadLocationHistory()
+    loadLocationHistory(),
+    loadReservations().catch((error) => {
+      if (!isDemoMode()) throw error;
+      return [];
+    })
   ]);
   refreshOverdueStatus();
 }
@@ -164,10 +180,13 @@ function applyRoleNav() {
   $('userRole').textContent = demo ? `${roleLabel(profile?.role)}（測試）` : roleLabel(profile?.role);
   $('userAvatar').textContent = (profile?.display_name || '用').slice(0, 1);
   $('logoutBtn').hidden = !profile;
+  document.body.classList.toggle('borrower-view', Boolean(profile) && !staff);
   if ($('sideFoot')) {
     $('sideFoot').textContent = demo
       ? '測試模式：資料只存在此瀏覽器，關閉分頁後會消失'
-      : '資料儲存在雲端資料庫，可在不同裝置同步';
+      : isFormalPocketBaseMode()
+        ? '正式模式：借用／預借／使用／歸還會寫入 PocketBase'
+        : '資料儲存在雲端資料庫，可在不同裝置同步';
   }
   updateBackendStatusUi();
 }
@@ -359,9 +378,11 @@ function renderDashboard() {
 
 function renderInventory() {
   const data = paginate(filteredItems(), state.page);
+  const staff = isStaff();
   state.page = data.page;
+  const colSpan = staff ? 13 : 8;
   if (!data.total) {
-    $('inventoryBody').innerHTML = '<tr><td colspan="13"><div class="empty">找不到符合條件的財產</div></td></tr>';
+    $('inventoryBody').innerHTML = `<tr><td colspan="${colSpan}"><div class="empty">找不到符合條件的財產</div></td></tr>`;
     $('inventoryCards').innerHTML = '<div class="empty">找不到符合條件的財產</div>';
     $('inventoryPager').innerHTML = pagerHTML('inventory', data);
     return;
@@ -374,13 +395,13 @@ function renderInventory() {
       <td class="pid">${esc(item.propertyId)}</td>
       <td>${esc(displayValue(item.location))}</td>
       <td>${esc(displayValue(item.department))}</td>
-      <td>${esc(displayValue(item.custodian))}</td>
+      ${staff ? `<td>${esc(displayValue(item.custodian))}</td>` : ''}
       <td>${item.useCount}</td>
       <td><span class="badge">${esc(displayValue(item.status))}</span></td>
-      <td><span class="badge ${auditStatusClass(item.auditStatus)}">${esc(item.auditStatus)}</span></td>
+      ${staff ? `<td><span class="badge ${auditStatusClass(item.auditStatus)}">${esc(item.auditStatus)}</span></td>` : ''}
       <td>${availabilityBadge(item)}</td>
-      <td>${esc(loanBorrowerText(item))}</td>
-      <td>${esc(loanDueText(item))}</td>
+      ${staff ? `<td>${esc(loanBorrowerText(item))}</td>` : ''}
+      ${staff ? `<td>${esc(loanDueText(item))}</td>` : ''}
       <td><button type="button" class="link-btn" data-open-item="${esc(item.propertyId)}">查看</button></td>
     </tr>
   `).join('');
@@ -392,7 +413,7 @@ function renderInventory() {
         <h3>${esc(item.name)}</h3>
         <div class="pid">${esc(item.propertyId)}</div>
         <div class="meta-row"><span>${esc(displayValue(item.location))}</span>${availabilityBadge(item)}</div>
-        <div class="meta-row"><span>${esc(displayValue(item.custodian))}</span><span>使用 ${item.useCount} 次</span></div>
+        <div class="meta-row">${staff ? `<span>${esc(displayValue(item.custodian))}</span>` : '<span></span>'}<span>使用 ${item.useCount} 次</span></div>
         <div class="card-actions">
           <button type="button" class="link-btn" data-open-item="${esc(item.propertyId)}">查看資料</button>
         </div>
@@ -734,6 +755,8 @@ function render() {
   if (state.view === 'inventory') renderInventory();
   if (state.view === 'loans') renderLoans();
   if (state.view === 'loanHistory') renderLoanHistory();
+  if (state.view === 'myReservations') renderMyReservations();
+  if (state.view === 'reservations') renderReservationManage();
   if (state.view === 'audit') renderAuditPage();
   if (state.view === 'usage') renderUsagePage();
   if (state.view === 'locations') renderLocations();
@@ -762,36 +785,40 @@ function openItem(propertyId) {
     return;
   }
   const loan = currentLoanOf(item);
+  const staff = isStaff();
   const alert = item.returnAlert === 'damaged'
     ? '<div class="warn-banner danger">此財產最近歸還時有損壞，請管理者後續處理。</div>'
     : item.returnAlert === 'missing_parts'
       ? '<div class="warn-banner">此財產最近歸還時配件缺少，請管理者後續處理。</div>'
       : '';
+  const canReserve = item.availabilityStatus === AVAILABILITY.AVAILABLE
+    || item.availabilityStatus === AVAILABILITY.RESERVED;
   const fields = [
         ['財產名稱', item.name],
         ['財產編號', item.propertyId],
         ['目前位置', displayValue(item.location)],
         ['保管單位', displayValue(item.department)],
-        isStaff() ? ['保管人', displayValue(item.custodian)] : null,
+        staff ? ['保管人', displayValue(item.custodian)] : null,
         ['規格', displayValue(item.specification)],
         ['單位', displayValue(item.unit)],
-        isStaff() ? ['單價', formatPrice(item.price)] : null,
-        isStaff() ? ['購買日期', formatDate(item.purchaseDate)] : null,
-        isStaff() ? ['使用年限', Number.isFinite(item.serviceLife) ? `${item.serviceLife} 年` : '未提供'] : null,
-        isStaff() ? ['廠商', displayValue(item.supplier)] : null,
+        staff ? ['單價', formatPrice(item.price)] : null,
+        staff ? ['購買日期', formatDate(item.purchaseDate)] : null,
+        staff ? ['使用年限', Number.isFinite(item.serviceLife) ? `${item.serviceLife} 年` : '未提供'] : null,
+        staff ? ['供應商', displayValue(item.supplier)] : null,
         ['廠牌', displayValue(item.brand)],
         ['型號', displayValue(item.model)],
         ['財產狀態', item.availabilityStatus === AVAILABILITY.LOST ? '異常' : displayValue(item.status)],
         ['借用狀態', item.availabilityLabel],
-        isStaff() ? ['目前借用人', loan && isOpenLoan(loan) ? loan.borrowerName : '—'] : null,
+        staff ? ['目前借用人', loan && isOpenLoan(loan) ? loan.borrowerName : '—'] : null,
         ['借出時間', loan && isOpenLoan(loan) ? formatDateTime(loan.checkedOutAt) : '—'],
         ['預計歸還時間', loan && isOpenLoan(loan) ? formatDateTime(loan.expectedReturnAt) : '—'],
         ['借用用途', loan && isOpenLoan(loan) ? loan.purpose : '—'],
         ['使用次數', String(item.useCount)],
-        isStaff() ? ['最後盤點時間', item.lastAuditAt ? formatDateTime(item.lastAuditAt) : '尚未盤點'] : null,
-        isStaff() ? ['盤點狀態', item.auditStatus] : null,
-        ['備註', displayValue(item.note)]
+        staff ? ['最後盤點時間', item.lastAuditAt ? formatDateTime(item.lastAuditAt) : '尚未盤點'] : null,
+        staff ? ['盤點狀態', item.auditStatus] : null,
+        staff ? ['內部備註', displayValue(item.note)] : null
       ].filter(Boolean);
+  $('detailTitle').textContent = item.name || '財產';
   $('detailBody').innerHTML = `
     <div class="detail-photo"><img src="${esc(imageOf(item))}" alt="${esc(item.name)}"></div>
     ${alert}
@@ -799,20 +826,78 @@ function openItem(propertyId) {
       ${fields.map(([k, v]) => `<div class="kv"><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}
     </dl>
     <div class="action-grid">
-      ${isStaff() ? loanActionButtons(item) : `<button type="button" class="primary" data-self="borrow">前往自助借用</button>`}
-      ${isStaff() ? `<button type="button" class="secondary" data-usage="${esc(item.propertyId)}">現場使用登記</button>
+      ${staff ? loanActionButtons(item) : `<button type="button" class="primary" data-self="borrow">前往自助借用</button>`}
+      ${canReserve ? `<button type="button" class="secondary" data-reserve="${esc(item.propertyId)}">預約借用</button>` : ''}
+      ${staff ? `<button type="button" class="secondary" data-usage="${esc(item.propertyId)}">現場使用登記</button>
       <button type="button" class="primary" data-audit="${esc(item.propertyId)}">執行盤點</button>
       <button type="button" class="secondary" data-location="${esc(item.propertyId)}">更新位置</button>
       <button type="button" class="secondary" data-image="${esc(item.propertyId)}">上傳圖片</button>
       <button type="button" class="secondary" data-history="${esc(item.propertyId)}">查看紀錄</button>` : ''}
     </div>
     <div class="action-hint">
-      <p><strong>辦理借出：</strong>物品會離開原存放地點，需要辦理歸還。</p>
-      <p><strong>現場使用登記：</strong>物品未借離，只記錄一次使用。</p>
+      <p><strong>辦理借出：</strong>物品會離開原存放地點，需要辦理歸還；借出成功才增加使用次數。</p>
+      <p><strong>預約借用：</strong>僅鎖定時段，申請本身不增加使用次數。</p>
+      <p><strong>現場使用登記：</strong>物品未借離，只記錄一次使用並增加一次使用次數。</p>
     </div>
   `;
   state.returnToDetailId = item.propertyId;
   openExclusiveDialog('detailDialog');
+}
+
+function openReservation(propertyId) {
+  const item = getItem(propertyId);
+  if (!item) return;
+  $('reservationPropertyId').value = item.propertyId;
+  $('reservationEyebrow').textContent = `${item.name} · ${item.propertyId}`;
+  $('reservationPurpose').value = '';
+  $('reservationStart').value = toInputDateTime();
+  const end = new Date();
+  end.setDate(end.getDate() + 1);
+  $('reservationEnd').value = toInputDateTime(end);
+  $('reservationContact').value = getProfile()?.email || '';
+  $('reservationNote').value = '';
+  state.returnToDetailId = item.propertyId;
+  openExclusiveDialog('reservationDialog');
+}
+
+function reservationCardHTML(row, { manage = false } = {}) {
+  const mine = getProfile()?.id && row.userId === getProfile().id;
+  return `
+    <div class="audit-item">
+      <strong>${esc(row.propertyName)} · ${esc(row.propertyId)}</strong>
+      <div class="meta-row">
+        <span class="badge">${esc(row.statusLabel)}</span>
+        <span>${esc(row.id)}</span>
+      </div>
+      <div>${esc(formatDateTime(row.startAt))} → ${esc(formatDateTime(row.endAt))}</div>
+      <div>用途：${esc(row.purpose)}${row.userName ? ` · ${esc(row.userName)}` : ''}</div>
+      ${row.rejectionReason ? `<div class="muted">拒絕原因：${esc(row.rejectionReason)}</div>` : ''}
+      <div class="card-actions">
+        ${mine && ['pending', 'approved'].includes(row.status)
+          ? `<button type="button" class="secondary" data-cancel-reservation="${esc(row.recordId)}">取消預借</button>`
+          : ''}
+        ${manage && row.status === 'pending'
+          ? `<button type="button" class="primary" data-approve-reservation="${esc(row.recordId)}">核准</button>
+             <button type="button" class="danger" data-reject-reservation="${esc(row.recordId)}">拒絕</button>`
+          : ''}
+        <button type="button" class="link-btn" data-open-item="${esc(row.propertyId)}">查看財產</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderMyReservations() {
+  const rows = listMyReservations();
+  $('myReservationList').innerHTML = rows.length
+    ? rows.map((row) => reservationCardHTML(row)).join('')
+    : '<div class="empty">尚無預借申請</div>';
+}
+
+function renderReservationManage() {
+  const rows = listManageReservations();
+  $('reservationManageList').innerHTML = rows.length
+    ? rows.map((row) => reservationCardHTML(row, { manage: true })).join('')
+    : '<div class="empty">目前沒有待處理的預借</div>';
 }
 
 function openUsage(propertyId) {
@@ -1035,9 +1120,24 @@ function askLocationConfirm(propertyId, fromLocation, toLocation) {
   openExclusiveDialog('confirmDialog');
 }
 
+async function resetScanCameraUi() {
+  await stopCameraScan();
+  if ($('scanCameraPanel')) $('scanCameraPanel').hidden = true;
+  if ($('scanVideo')) {
+    $('scanVideo').hidden = false;
+    $('scanVideo').srcObject = null;
+  }
+  if ($('scanFallback')) $('scanFallback').innerHTML = '';
+  if ($('scanEngineText')) $('scanEngineText').textContent = '';
+}
+
 function openScan() {
+  resetScanCameraUi();
   $('scanCode').value = '';
   $('scanError').textContent = '';
+  if ($('scanHint')) {
+    $('scanHint').textContent = '啟用相機掃描 QR；若拒絕權限，可改以手動輸入財產編號。';
+  }
   openExclusiveDialog('scanDialog');
 }
 
@@ -1045,16 +1145,18 @@ function lookupScan(raw) {
   const code = parseScanPayload(raw);
   const item = findByPropertyId(code);
   if (!item) {
-    $('scanError').textContent = `找不到財產編號「${code}」，請確認後再試。`;
+    if ($('scanError')) $('scanError').textContent = `找不到財產編號「${code}」，請確認後再試。`;
     toast('找不到對應財產', 'error');
-    return;
+    return false;
   }
+  resetScanCameraUi();
   closeDialog('scanDialog');
   $('filterQuery').value = code;
   state.page = 1;
   setView('inventory');
   openItem(item.propertyId);
   toast(`已找到「${item.name}」，目前狀態：${item.availabilityLabel}`);
+  return true;
 }
 
 async function afterMutation(propertyId, message) {
@@ -1077,7 +1179,7 @@ function restoreDetailAfterClose(closedId) {
   }
   const shouldRestore = [
     'checkoutDialog', 'checkinDialog', 'usageDialog', 'auditDialog',
-    'locationDialog', 'imageDialog', 'historyDialog', 'confirmDialog'
+    'locationDialog', 'imageDialog', 'historyDialog', 'confirmDialog', 'reservationDialog'
   ].includes(closedId);
   if (shouldRestore && state.returnToDetailId) openItem(state.returnToDetailId);
 }
@@ -1196,6 +1298,43 @@ function bindEvents() {
     const usageBtn = event.target.closest('[data-usage]');
     if (usageBtn) {
       openUsage(usageBtn.dataset.usage);
+      return;
+    }
+    const reserveBtn = event.target.closest('[data-reserve]');
+    if (reserveBtn) {
+      openReservation(reserveBtn.dataset.reserve);
+      return;
+    }
+    const cancelRsv = event.target.closest('[data-cancel-reservation]');
+    if (cancelRsv) {
+      cancelReservation(cancelRsv.dataset.cancelReservation)
+        .then(() => {
+          render();
+          toast('已取消預借');
+        })
+        .catch((error) => toast(error.message || '取消失敗', 'error'));
+      return;
+    }
+    const approveRsv = event.target.closest('[data-approve-reservation]');
+    if (approveRsv) {
+      approveReservation(approveRsv.dataset.approveReservation)
+        .then(() => {
+          render();
+          toast('已核准預借');
+        })
+        .catch((error) => toast(error.message || '核准失敗', 'error'));
+      return;
+    }
+    const rejectRsv = event.target.closest('[data-reject-reservation]');
+    if (rejectRsv) {
+      const reason = window.prompt('請輸入拒絕原因');
+      if (!reason) return;
+      rejectReservation(rejectRsv.dataset.rejectReservation, reason)
+        .then(() => {
+          render();
+          toast('已拒絕預借');
+        })
+        .catch((error) => toast(error.message || '拒絕失敗', 'error'));
       return;
     }
     const auditBtn = event.target.closest('[data-audit]');
@@ -1525,11 +1664,67 @@ function bindEvents() {
     lookupScan($('scanCode').value);
   });
   $('cameraScanBtn').addEventListener('click', async () => {
+    $('scanError').textContent = '';
     try {
-      await startCameraScan();
+      $('scanCameraPanel').hidden = false;
+      $('scanVideo').hidden = false;
+      $('scanFallback').innerHTML = '';
+      const result = await startCameraScan({
+        videoEl: $('scanVideo'),
+        fallbackContainerId: 'scanFallback',
+        onDetected: (propertyId) => {
+          $('scanCode').value = propertyId;
+          lookupScan(propertyId);
+        }
+      });
+      if ($('scanEngineText')) {
+        $('scanEngineText').textContent = result?.engine === 'BarcodeDetector'
+          ? '掃描引擎：BarcodeDetector'
+          : '掃描引擎：html5-qrcode';
+      }
+      if (result?.engine === 'html5-qrcode') {
+        $('scanVideo').hidden = true;
+      }
     } catch (error) {
+      await resetScanCameraUi();
       $('scanError').textContent = error.message;
       toast(error.message, 'error');
+      $('scanCode').focus();
+    }
+  });
+  $('stopCameraBtn')?.addEventListener('click', async () => {
+    await resetScanCameraUi();
+  });
+  document.getElementById('scanDialog')?.addEventListener('close', () => {
+    resetScanCameraScanSafe();
+  });
+
+  function resetScanCameraScanSafe() {
+    resetScanCameraUi().catch(() => {});
+  }
+
+  $('reservationForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const btn = event.submitter;
+    if (btn) btn.disabled = true;
+    try {
+      await createReservation({
+        propertyId: $('reservationPropertyId').value,
+        purpose: $('reservationPurpose').value,
+        startAt: $('reservationStart').value,
+        endAt: $('reservationEnd').value,
+        contact: $('reservationContact').value,
+        note: $('reservationNote').value
+      });
+      closeDialog('reservationDialog', { silent: true });
+      await refreshData();
+      render();
+      if (state.returnToDetailId) openItem(state.returnToDetailId);
+      toast('預借申請已送出（未增加使用次數）');
+    } catch (error) {
+      toast(error.message || '預借失敗', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
     }
   });
 
@@ -1704,7 +1899,7 @@ async function bootApp() {
     if (isDemoMode()) {
       markDemoBackend();
     } else {
-      const status = await probePocketBase();
+      const status = await probePocketBase({ requireRead: true });
       updateBackendStatusUi();
       if (status.mode !== 'connected') {
         throw new Error(status.message || 'PocketBase 尚未連線');

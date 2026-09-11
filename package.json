@@ -15,6 +15,7 @@
     "vite": "^6.3.5"
   },
   "dependencies": {
+    "html5-qrcode": "^2.3.8",
     "pocketbase": "^0.28.1"
   }
 }

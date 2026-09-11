@@ -58,7 +58,7 @@ export async function addUsage({ propertyId, userName, department, usedAt, purpo
     purpose,
     note: note || null,
     usage_type: 'on_site',
-    idempotency_key: `usage-${item.id}-${usedAt}-${userName}-${Math.random().toString(36).slice(2, 8)}`
+    idempotency_key: `usage-${item.id}-${usedAt}-${userName}`
   });
   await loadCatalog();
   await loadUsage();

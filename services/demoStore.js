@@ -104,6 +104,7 @@ function blankData() {
   return {
     assets: seedAssets(),
     loans: [],
+    reservations: [],
     usage: [],
     audits: [],
     locations: [],
@@ -127,6 +128,7 @@ function ensureData() {
   const normalized = {
     assets: Array.isArray(current.assets) ? current.assets : blank.assets,
     loans: Array.isArray(current.loans) ? current.loans : [],
+    reservations: Array.isArray(current.reservations) ? current.reservations : [],
     usage: Array.isArray(current.usage) ? current.usage : [],
     audits: Array.isArray(current.audits) ? current.audits : [],
     locations: Array.isArray(current.locations) ? current.locations : [],
@@ -182,6 +184,133 @@ export function demoAssets() {
 
 export function demoLoans() {
   return Array.isArray(getDemoData().loans) ? getDemoData().loans.slice() : [];
+}
+
+export function demoReservations() {
+  return Array.isArray(getDemoData().reservations) ? getDemoData().reservations.slice() : [];
+}
+
+function nextReservationNumber(data) {
+  const prefix = `RSV${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-`;
+  const same = (data.reservations || []).filter((row) => String(row.reservation_number || '').startsWith(prefix));
+  return `${prefix}${String(same.length + 1).padStart(3, '0')}`;
+}
+
+function reservationOverlaps(startAt, endAt, otherStart, otherEnd) {
+  return new Date(startAt).getTime() < new Date(otherEnd).getTime()
+    && new Date(endAt).getTime() > new Date(otherStart).getTime();
+}
+
+export function demoCreateReservation(payload) {
+  const data = getDemoData();
+  const asset = assetById(data, payload.asset_id);
+  if (!asset || asset.active === false) throw new Error('找不到財產');
+  if (asset.borrowable === false) throw new Error('此財產不可借用');
+  if (['maintenance', 'lost'].includes(asset.availability_status)) throw new Error('此財產目前不可預約');
+  const startAt = payload.start_at;
+  const endAt = payload.end_at;
+  if (!startAt || !endAt) throw new Error('請填寫預約起迄時間');
+  if (new Date(endAt) <= new Date(startAt)) throw new Error('預約結束時間必須晚於開始時間');
+  const conflict = (data.reservations || []).some((row) => (
+    row.asset === asset.id
+    && ['pending', 'approved'].includes(row.status)
+    && reservationOverlaps(startAt, endAt, row.start_at, row.end_at)
+  ));
+  if (conflict) throw new Error('此時段已有其他待審或已核准的預約');
+  const now = new Date().toISOString();
+  const profile = demoProfile();
+  const rec = {
+    id: uid('rsv'),
+    reservation_number: nextReservationNumber(data),
+    asset: asset.id,
+    property_id: asset.property_id,
+    property_name: asset.name,
+    user: profile?.id || 'demo-borrower',
+    user_name: profile?.display_name || profile?.name || '測試使用者',
+    purpose: payload.purpose,
+    start_at: startAt,
+    end_at: endAt,
+    status: 'pending',
+    contact: payload.contact || '',
+    note: payload.note || '',
+    rejection_reason: '',
+    approved_at: '',
+    converted_loan: '',
+    created: now,
+    updated: now
+  };
+  data.reservations = data.reservations || [];
+  data.reservations.unshift(rec);
+  // 預借申請本身不增加 usage_count
+  log(data, '預約申請', { reservation_number: rec.reservation_number });
+  saveData(data);
+  return rec;
+}
+
+export function demoApproveReservation(id) {
+  const data = getDemoData();
+  const rec = (data.reservations || []).find((row) => row.id === id);
+  if (!rec) throw new Error('找不到預約');
+  if (rec.status !== 'pending') throw new Error('僅能核准待審核的預約');
+  const conflict = (data.reservations || []).some((row) => (
+    row.id !== rec.id
+    && row.asset === rec.asset
+    && ['pending', 'approved'].includes(row.status)
+    && reservationOverlaps(rec.start_at, rec.end_at, row.start_at, row.end_at)
+  ));
+  if (conflict) throw new Error('此時段已有衝突的預約');
+  rec.status = 'approved';
+  rec.approved_at = new Date().toISOString();
+  rec.updated = rec.approved_at;
+  const asset = assetById(data, rec.asset);
+  if (asset && asset.availability_status === 'available') {
+    asset.availability_status = 'reserved';
+  }
+  log(data, '核准預約', { reservation_number: rec.reservation_number });
+  saveData(data);
+  return rec;
+}
+
+export function demoRejectReservation(id, reason) {
+  const data = getDemoData();
+  const rec = (data.reservations || []).find((row) => row.id === id);
+  if (!rec) throw new Error('找不到預約');
+  if (!String(reason || '').trim()) throw new Error('請填寫拒絕原因');
+  rec.status = 'rejected';
+  rec.rejection_reason = String(reason).trim();
+  rec.updated = new Date().toISOString();
+  const asset = assetById(data, rec.asset);
+  if (asset && asset.availability_status === 'reserved') {
+    const other = (data.reservations || []).some((row) => (
+      row.id !== rec.id && row.asset === rec.asset && row.status === 'approved'
+    ));
+    const openLoan = (data.loans || []).some((row) => (
+      row.asset === rec.asset && !['returned', 'rejected', 'cancelled'].includes(row.status)
+    ));
+    if (!other && !openLoan) asset.availability_status = 'available';
+  }
+  log(data, '拒絕預約', { reservation_number: rec.reservation_number });
+  saveData(data);
+  return rec;
+}
+
+export function demoCancelReservation(id) {
+  const data = getDemoData();
+  const rec = (data.reservations || []).find((row) => row.id === id);
+  if (!rec) throw new Error('找不到預約');
+  if (!['pending', 'approved'].includes(rec.status)) throw new Error('此預約目前無法取消');
+  rec.status = 'cancelled';
+  rec.updated = new Date().toISOString();
+  const asset = assetById(data, rec.asset);
+  if (asset && asset.availability_status === 'reserved') {
+    const other = (data.reservations || []).some((row) => (
+      row.id !== rec.id && row.asset === rec.asset && row.status === 'approved'
+    ));
+    if (!other) asset.availability_status = 'available';
+  }
+  log(data, '取消預約', { reservation_number: rec.reservation_number });
+  saveData(data);
+  return rec;
 }
 
 export function demoUsage() {

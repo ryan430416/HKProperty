@@ -1,5 +1,12 @@
 import { PB } from '../pocketbase/schema.mjs';
-import { isDemoMode } from './authService.js';
+import { getProfile, isDemoMode } from './authService.js';
+import {
+  demoApproveReservation,
+  demoCancelReservation,
+  demoCreateReservation,
+  demoRejectReservation,
+  demoReservations
+} from './demoStore.js';
 import { getItem, loadCatalog } from './inventoryService.js';
 import { getFullList, hkpPost, relationId } from './hkpApi.js';
 import { loadLoans } from './loanService.js';
@@ -25,13 +32,16 @@ export const RESERVATION_STATUS_LABEL = {
 };
 
 export function mapReservation(row) {
+  const assetId = relationId(row.asset) || row.asset_id || row.asset;
+  const item = getItem(assetId) || getItem(row.property_id);
   return {
     recordId: row.id,
-    id: row.reservation_number,
-    assetId: relationId(row.asset) || row.asset_id,
-    propertyId: getItem(relationId(row.asset))?.propertyId || row.property_id || '',
-    propertyName: getItem(relationId(row.asset))?.name || row.property_name || '',
-    userId: relationId(row.user) || row.user_id,
+    id: row.reservation_number || row.id,
+    assetId,
+    propertyId: item?.propertyId || row.property_id || '',
+    propertyName: item?.name || row.property_name || '',
+    userId: relationId(row.user) || row.user_id || row.user || '',
+    userName: row.user_name || row.expand?.user?.name || '',
     purpose: row.purpose,
     startAt: row.start_at,
     endAt: row.end_at,
@@ -47,11 +57,11 @@ export function mapReservation(row) {
 
 export async function loadReservations() {
   if (isDemoMode()) {
-    cache = [];
+    cache = demoReservations().map(mapReservation);
     return cache;
   }
   const rows = await getFullList(PB.reservations, { sort: '-created' });
-  cache = (rows || []).map(mapReservation);
+  cache = (Array.isArray(rows) ? rows : []).map(mapReservation);
   return cache;
 }
 
@@ -61,41 +71,60 @@ export function listReservations(propertyId) {
   return list.filter((row) => row.propertyId === propertyId || row.assetId === propertyId);
 }
 
+export function listMyReservations() {
+  const profile = getProfile();
+  if (!profile?.id) return [];
+  return listReservations().filter((row) => row.userId === profile.id);
+}
+
+export function listManageReservations() {
+  return listReservations().filter((row) => ['pending', 'approved'].includes(row.status));
+}
+
 export async function createReservation(payload) {
   const item = getItem(payload.propertyId);
   if (!item) throw new Error('找不到財產');
-  if (isDemoMode()) throw new Error('測試模式暫不支援預借，請改用立即借用');
-  const data = await hkpPost('/api/hkproperty/reservations', {
+  const body = {
     asset_id: item.id,
     purpose: payload.purpose,
     start_at: new Date(payload.startAt).toISOString(),
     end_at: new Date(payload.endAt).toISOString(),
     contact: payload.contact || null,
     note: payload.note || null
-  });
+  };
+  const data = isDemoMode()
+    ? demoCreateReservation(body)
+    : await hkpPost('/api/hkproperty/reservations', body);
   await Promise.all([loadCatalog(), loadReservations()]);
   return mapReservation(data);
 }
 
 export async function approveReservation(id) {
-  const data = await hkpPost(`/api/hkproperty/reservations/${id}/approve`);
+  const data = isDemoMode()
+    ? demoApproveReservation(id)
+    : await hkpPost(`/api/hkproperty/reservations/${id}/approve`);
   await Promise.all([loadCatalog(), loadReservations()]);
   return mapReservation(data);
 }
 
 export async function rejectReservation(id, reason) {
-  const data = await hkpPost(`/api/hkproperty/reservations/${id}/reject`, { reason });
+  const data = isDemoMode()
+    ? demoRejectReservation(id, reason)
+    : await hkpPost(`/api/hkproperty/reservations/${id}/reject`, { reason });
   await Promise.all([loadCatalog(), loadReservations()]);
   return mapReservation(data);
 }
 
 export async function cancelReservation(id) {
-  const data = await hkpPost(`/api/hkproperty/reservations/${id}/cancel`);
+  const data = isDemoMode()
+    ? demoCancelReservation(id)
+    : await hkpPost(`/api/hkproperty/reservations/${id}/cancel`);
   await Promise.all([loadCatalog(), loadReservations()]);
   return mapReservation(data);
 }
 
 export async function checkoutReservation(id, payload = {}) {
+  if (isDemoMode()) throw new Error('測試模式請改用立即借用完成取件');
   const data = await hkpPost(`/api/hkproperty/reservations/${id}/checkout`, {
     checkout_condition: payload.checkoutCondition || null,
     note: payload.note || null,

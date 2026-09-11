@@ -28,6 +28,8 @@
         <button type="button" class="nav-item" data-view="inventory">財產清冊</button>
         <button type="button" class="nav-item" data-min-role="staff" data-view="loans">借出管理</button>
         <button type="button" class="nav-item" data-view="loanHistory">借用紀錄</button>
+        <button type="button" class="nav-item" data-view="myReservations">我的預借</button>
+        <button type="button" class="nav-item" data-min-role="staff" data-view="reservations">預借管理</button>
         <button type="button" class="nav-item" data-min-role="staff" data-view="audit">盤點作業</button>
         <button type="button" class="nav-item" data-min-role="staff" data-view="usage">使用紀錄</button>
         <button type="button" class="nav-item" data-min-role="staff" data-view="locations">位置管理</button>
@@ -91,9 +93,9 @@
                 <button type="button" class="ghost-btn" id="demoAdminBtn">以管理者進入</button>
               </div>
             </div>
-            <details class="login-real" hidden>
+            <details class="login-real" id="loginRealDetails">
               <summary>使用 PocketBase 正式登入</summary>
-              <p class="muted">正式上線再開。新帳號預設為借用人。</p>
+              <p class="muted">正式模式會寫入雲端資料庫。請確認上方狀態為「PocketBase 正式模式」後再登入。</p>
               <form id="loginForm">
                 <div class="field">
                   <label for="loginEmail">電子郵件 <span class="req">必填</span></label>
@@ -465,13 +467,13 @@
                   <th scope="col">財產編號</th>
                   <th scope="col">目前位置</th>
                   <th scope="col">保管單位</th>
-                  <th scope="col">保管人</th>
+                  <th scope="col" data-staff-col>保管人</th>
                   <th scope="col">使用次數</th>
                   <th scope="col">財產狀態</th>
-                  <th scope="col">盤點狀態</th>
+                  <th scope="col" data-staff-col>盤點狀態</th>
                   <th scope="col">借用狀態</th>
-                  <th scope="col">目前借用人</th>
-                  <th scope="col">預計歸還日</th>
+                  <th scope="col" data-staff-col>目前借用人</th>
+                  <th scope="col" data-staff-col>預計歸還日</th>
                   <th scope="col">操作</th>
                 </tr>
               </thead>
@@ -577,6 +579,22 @@
           </div>
           <div class="card-list" id="loanHistoryCards"></div>
           <div class="pager" id="loanHistoryPager"></div>
+        </section>
+
+        <section class="view" id="view-myReservations" hidden aria-label="我的預借">
+          <div class="panel">
+            <h2>我的預借申請</h2>
+            <p class="muted">預約申請不會增加使用次數；取件時才會建立借用紀錄。</p>
+            <div id="myReservationList"></div>
+          </div>
+        </section>
+
+        <section class="view" id="view-reservations" hidden aria-label="預借管理">
+          <div class="panel">
+            <h2>預借管理</h2>
+            <p class="muted">審核待處理與已核准的預約。核准前會再檢查時段衝突。</p>
+            <div id="reservationManageList"></div>
+          </div>
         </section>
 
         <section class="view" id="view-audit" hidden aria-label="盤點作業">
@@ -852,15 +870,61 @@
         </div>
         <button type="button" class="icon-btn" data-close="scanDialog" aria-label="關閉">×</button>
       </div>
-      <p class="muted">相機掃描功能已預留接點，目前請改以手動輸入財產編號查找。</p>
+      <p class="muted" id="scanHint">啟用相機掃描 QR；若拒絕權限，可改以手動輸入財產編號。</p>
+      <div id="scanCameraPanel" class="scan-camera" hidden>
+        <video id="scanVideo" class="scan-video" playsinline muted></video>
+        <div id="scanFallback" class="scan-fallback"></div>
+        <p class="muted" id="scanEngineText"></p>
+        <button type="button" class="secondary" id="stopCameraBtn">停止相機</button>
+      </div>
       <div class="field">
-        <label for="scanCode">財產編號</label>
+        <label for="scanCode">財產編號（手動輸入）</label>
         <input id="scanCode" required placeholder="例如 820091001" autocomplete="off" />
       </div>
       <p class="form-error" id="scanError" role="alert"></p>
       <div class="dialog-actions">
         <button type="button" class="secondary" id="cameraScanBtn">啟用相機掃描</button>
         <button type="submit" class="primary">查找財產</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="reservationDialog" class="form-dialog">
+    <form id="reservationForm">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow" id="reservationEyebrow">預約借用</p>
+          <h2>預約借用</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close="reservationDialog" aria-label="關閉">×</button>
+      </div>
+      <div class="dialog-scroll">
+        <p class="muted">送出預借申請不會增加使用次數。系統會檢查時段是否與其他待審／已核准預約衝突。</p>
+        <input type="hidden" id="reservationPropertyId" />
+        <div class="field">
+          <label for="reservationPurpose">預約用途 <span class="req">必填</span></label>
+          <input id="reservationPurpose" required maxlength="80" />
+        </div>
+        <div class="field">
+          <label for="reservationStart">開始時間 <span class="req">必填</span></label>
+          <input id="reservationStart" type="datetime-local" required />
+        </div>
+        <div class="field">
+          <label for="reservationEnd">結束時間 <span class="req">必填</span></label>
+          <input id="reservationEnd" type="datetime-local" required />
+        </div>
+        <div class="field">
+          <label for="reservationContact">聯絡方式</label>
+          <input id="reservationContact" maxlength="60" placeholder="電話或 Email" />
+        </div>
+        <div class="field">
+          <label for="reservationNote">備註</label>
+          <textarea id="reservationNote" rows="3" maxlength="200"></textarea>
+        </div>
+      </div>
+      <div class="dialog-actions sticky">
+        <button type="button" class="secondary" data-close="reservationDialog">取消</button>
+        <button type="submit" class="primary">送出預借申請</button>
       </div>
     </form>
   </dialog>
