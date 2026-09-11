@@ -1,42 +1,58 @@
 # 弘光財產系統 PocketBase 設定說明
 
-本系統已改為使用 **PocketBase** 儲存財產、借用、盤點、使用紀錄與圖片。前端只需要資料庫網址，管理者帳密只留在本機匯入腳本。
+前端部署在 [https://hk-property.vercel.app/](https://hk-property.vercel.app/)，PocketBase 必須部署在**獨立且具持久化硬碟**的伺服器（不可放在 Vercel Serverless）。
 
-## 1. 下載並啟動 PocketBase
+## 重要安全原則
 
-1. 到 [PocketBase 發布頁](https://github.com/pocketbase/pocketbase/releases) 下載 Windows 版（建議 0.23 以上）。
-2. 把 `pocketbase.exe` 放到本專案根目錄 `d:\HKProperty`（此檔已被 git 忽略）。
+- 前端只使用 `VITE_POCKETBASE_URL`，**不可**寫入 Superuser 帳密或 Token。
+- 本機 `.env` 的 `POCKETBASE_ADMIN_*` 僅供匯入腳本，不可提交 GitHub。
+- `pb_data/` 不可提交；`pb_migrations/` 與 `pb_hooks/` 必須提交。
+- 前端一律以一般使用者身分操作；寫入借用／預借／使用次數走自訂 Route。
+
+## 1. Windows 本機啟動
+
+1. 下載 [PocketBase](https://github.com/pocketbase/pocketbase/releases)（建議 0.23+）。
+2. 將 `pocketbase.exe` 放在專案根目錄（已 gitignore）。
 3. 在專案根目錄執行：
 
 ```powershell
 .\pocketbase.exe serve --http=127.0.0.1:8090
 ```
 
-第一次啟動會建立 `pb_data`。請用瀏覽器開啟 http://127.0.0.1:8090/_/ 建立 **Superuser**（後台管理者）。
+開啟 http://127.0.0.1:8090/_/ 建立第一個 Superuser。
 
-專案裡的 `pb_hooks` 必須與執行檔在同一個工作目錄，借用／歸還 API 才會生效。
+`pb_hooks` 與 `pb_migrations` 會從此工作目錄載入。
 
-## 2. 本機 `.env`
+## 2. 環境變數
 
 複製 `.env.example` 為 `.env`：
 
 ```env
 VITE_POCKETBASE_URL=http://127.0.0.1:8090
 
+POCKETBASE_URL=http://127.0.0.1:8090
 POCKETBASE_ADMIN_EMAIL=你的_superuser信箱
 POCKETBASE_ADMIN_PASSWORD=你的_superuser密碼
 ```
 
-`POCKETBASE_ADMIN_*` 只給本機建立資料表與匯入清冊用，不要提交、不要放到 Vercel 前端。
+正式環境前端改為：
+
+```env
+VITE_POCKETBASE_URL=https://你的-pocketbase網域
+```
 
 ## 3. 建立資料表
+
+本機／自架：啟動 PocketBase 後會套用 `pb_migrations`。亦可：
 
 ```powershell
 npm install
 npm run setup:pocketbase
 ```
 
-這會建立 `users` 額外欄位（角色、學號、單位）以及 `assets`、`loan_records` 等集合。
+會建立／更新：`users`、`assets`、`loan_records`、`asset_reservations`、`usage_records`、`inventory_audits`、`location_history`、`operation_logs`、`system_settings`。
+
+**警告：** 不可在已有其他系統 `users` 的共用 PocketBase 上執行（例如先前多專案共用庫）。請使用**專用實例**。
 
 ## 4. 匯入 390 筆財產
 
@@ -46,45 +62,77 @@ npm run import:assets
 ```
 
 - 以 `property_id` 對應
-- 不存在則新增
-- 已存在則更新主檔欄位
-- **不會**覆蓋借用狀態、使用次數、圖片
+- 不存在則新增；已存在則更新主檔
+- **不**覆蓋借用狀態、使用次數、圖片、歷史
 
-## 5. 啟動網站
+## 5. 啟動前端
 
 ```powershell
 npm run dev
 ```
 
-開啟終端機顯示的網址（預設 http://localhost:5173）。
+註冊後預設為借用人；到 PocketBase 後台把角色改成 `admin` 或 `staff`。
 
-在登入頁用電子郵件與密碼「註冊借用人帳號」。接著到 PocketBase 後台 → **users** → 把你的帳號 `role` 改成 `admin`。
+測試入口仍可用（假帳號，資料在瀏覽器）。
 
-## 6. 部署注意
+## 6. Vercel
 
-- PocketBase 需要一台可長時間執行的主機（VPS、NAS、雲端 VM），不是只把前端放到 GitHub Pages。
-- 前端 `VITE_POCKETBASE_URL` 請填 **公開可連到的 PocketBase 網址**（例如 `https://pb.你的網域`）。
-- PocketBase 後台 **Settings → Application** 把前端網址加入允許的來源。
-- Vercel / 靜態空間只放前端，**不要**把 Superuser 密碼寫進環境變數給瀏覽器。
+1. 專案環境變數設定 `VITE_POCKETBASE_URL=https://你的-PB-HTTPS網域`
+2. 重新 Deploy（Vite 會把變數編譯進前端）
+3. 網站：https://hk-property.vercel.app/
 
-## 7. 借用規則
+## 7. CORS
 
-管理者登入網站 → 系統設定：
+PocketBase **Settings → Application → Allowed origins** 加入：
 
-| 情境 | 借用需核准 | 允許自助借還 |
-| --- | --- | --- |
-| 測試 | 關閉 | 開啟 |
-| 正式 | 開啟 | 關閉 |
+```text
+https://hk-property.vercel.app
+http://localhost:5173
+```
 
-## 8. 常見錯誤
+正式環境勿設為 `*`。
+
+## 8. QR Code
+
+內容格式：
+
+```text
+https://hk-property.vercel.app/?action=asset&propertyId=財產編號
+```
+
+掃描後開啟網站 → 登入（若需要）→ 顯示該財產。掃描本身不計使用次數。
+
+## 9. 持久化與備份
+
+- 將 `pb_data` 放在持久化磁碟／Volume。
+- 備份：停止服務後複製整個 `pb_data` 資料夾。
+- 還原：換回 `pb_data` 後再啟動。
+- **升級 PocketBase 前務必先備份。**
+- 不可把 `pb_data` 提交 GitHub。
+
+## 10. 自訂 API
+
+Hooks：`pb_hooks/main.pb.js`
+
+| Route | 用途 |
+| --- | --- |
+| `POST /api/hkproperty/loans/checkout` | 立即借用（transaction） |
+| `POST /api/hkproperty/loans/return` | 歸還 |
+| `POST /api/hkproperty/reservations` | 預借 |
+| `POST /api/hkproperty/reservations/:id/checkout` | 預借轉借出 |
+| `POST /api/hkproperty/usage` | 使用登記（idempotency） |
+| `GET /api/hkproperty/dashboard` | 總覽 |
+
+相容舊路徑 `/api/hkp/*` 仍可用。
+
+## 11. 常見問題
 
 | 現象 | 處理 |
 | --- | --- |
 | 尚未設定 PocketBase | 檢查 `.env` 的 `VITE_POCKETBASE_URL` 後重開 `npm run dev` |
-| 登入失敗 | 先註冊；密碼至少 8 碼 |
-| 借出 API 404 | 確認是在專案根目錄執行 `pocketbase.exe`，`pb_hooks` 有被載入 |
-| 無法載入清冊 | 先跑 `npm run setup:pocketbase` 與 `npm run import:assets` |
-| 註冊後仍是借用人 | 到 PocketBase 後台把 `role` 改成 `admin` 或 `staff` |
-| 圖片上傳失敗 | 僅 JPG／PNG／WebP，5MB 以內，且帳號需為 staff／admin |
+| CORS 錯誤 | 後台允許 Vercel 網域 |
+| 借出 API 404 | 確認以專案根目錄啟動 PocketBase，hooks 有載入 |
+| 共用庫 users 衝突 | 改用獨立 PocketBase 實例 |
+| 圖片上傳失敗 | JPG/PNG/WebP、≤5MB，且為 staff/admin |
 
-舊的 `supabase/` 資料夾僅供對照，新系統不再使用。
+舊的 `supabase/` 目錄僅供對照，系統不再使用。

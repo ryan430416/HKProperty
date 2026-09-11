@@ -139,7 +139,7 @@ export async function saveSettings(patch) {
     });
     return settings;
   }
-  const data = await hkpPost('/api/hkp/settings', {
+  const data = await hkpPost('/api/hkproperty/settings', {
     require_loan_approval: patch.requireLoanApproval,
     allow_self_checkout: patch.allowSelfCheckout,
     default_loan_days: patch.defaultLoanDays
@@ -268,7 +268,9 @@ export async function assertAvailableForCheckout(propertyId) {
   if (item.availabilityStatus === 'checked_out' || item.availabilityStatus === 'overdue') {
     throw new Error('此財產目前已借出，不可再次借出');
   }
-  if (item.availabilityStatus === 'pending') throw new Error('此財產已有待處理的借用申請');
+  if (item.availabilityStatus === 'reserved' || item.availabilityStatus === 'pending') {
+    throw new Error('此財產已有預借或待處理申請');
+  }
   if (item.availabilityStatus !== 'available') throw new Error('僅可借用狀態的財產才能辦理借出');
   return item;
 }
@@ -278,6 +280,7 @@ export async function checkout(payload) {
   const method = payload.checkoutMethod === CHECKOUT_METHOD.ADMIN ? CHECKOUT_METHOD.ADMIN : CHECKOUT_METHOD.SELF;
   const body = {
     asset_id: item.id,
+    property_id: item.propertyId,
     borrower_name: payload.borrowerName,
     borrower_number: payload.borrowerId,
     borrower_department: payload.borrowerDepartment,
@@ -287,7 +290,8 @@ export async function checkout(payload) {
     checkout_at: new Date(payload.checkedOutAt || Date.now()).toISOString(),
     checkout_condition: payload.checkoutCondition || null,
     note: payload.note || null,
-    checkout_method: method
+    checkout_method: method,
+    idempotency_key: payload.idempotencyKey || `checkout-${item.id}-${Date.now()}`
   };
   const data = isDemoMode()
     ? demoCheckout({
@@ -304,7 +308,7 @@ export async function checkout(payload) {
       note: body.note,
       checkout_method: method
     })
-    : await hkpPost('/api/hkp/loans', body);
+    : await hkpPost('/api/hkproperty/loans/checkout', body);
   await Promise.all([loadCatalog(), loadLoans()]);
   return { entry: mapLoan(data), item: getItem(item.propertyId) };
 }
@@ -313,7 +317,7 @@ export async function approveLoan(loanId) {
   const loan = getLoan(loanId);
   if (!loan) throw new Error('找不到借用申請');
   if (isDemoMode()) demoApprove(loan.recordId);
-  else await hkpPost(`/api/hkp/loans/${loan.recordId}/approve`);
+  else await hkpPost(`/api/hkproperty/loans/${loan.recordId}/approve`);
   await Promise.all([loadCatalog(), loadLoans()]);
   return getLoan(loan.id);
 }
@@ -322,7 +326,7 @@ export async function rejectLoan(loanId, reason) {
   const loan = getLoan(loanId);
   if (!loan) throw new Error('找不到借用申請');
   if (isDemoMode()) demoReject(loan.recordId, reason);
-  else await hkpPost(`/api/hkp/loans/${loan.recordId}/reject`, { reason });
+  else await hkpPost(`/api/hkproperty/loans/${loan.recordId}/reject`, { reason });
   await Promise.all([loadCatalog(), loadLoans()]);
   return getLoan(loan.id);
 }
@@ -331,7 +335,7 @@ export async function completeCheckout(loanId) {
   const loan = getLoan(loanId);
   if (!loan) throw new Error('找不到借用申請');
   if (isDemoMode()) demoCompleteCheckout(loan.recordId);
-  else await hkpPost(`/api/hkp/loans/${loan.recordId}/checkout`);
+  else await hkpPost('/api/hkproperty/loans/checkout', { loan_id: loan.recordId });
   await Promise.all([loadCatalog(), loadLoans()]);
   return { entry: getLoan(loan.id), item: getItem(loan.propertyId) };
 }
@@ -353,10 +357,10 @@ export async function checkin(payload) {
   if (isDemoMode()) {
     demoReturn(loan.recordId, args);
   } else {
-    const path = payload.requestOnly
-      ? `/api/hkp/loans/${loan.recordId}/return-request`
-      : `/api/hkp/loans/${loan.recordId}/return`;
-    await hkpPost(path, args);
+    await hkpPost('/api/hkproperty/loans/return', {
+      loan_id: loan.recordId,
+      ...args
+    });
   }
   await Promise.all([loadCatalog(), loadLoans()]);
   return { entry: getLoan(loan.id), item: getItem(loan.propertyId || item?.propertyId) };

@@ -16,10 +16,10 @@ export async function uploadAssetImage(assetId, file) {
   if (file.size > MAX_BYTES) throw new Error('檔案大小不可超過 5 MB');
   const client = requireClient();
   const form = new FormData();
-  form.append('photo', file);
+  form.append('image', file);
   try {
     const row = await client.collection(PB.assets).update(assetId, form);
-    const name = Array.isArray(row.photo) ? row.photo[0] : row.photo;
+    const name = Array.isArray(row.image) ? row.image[0] : row.image;
     return publicImageUrl(row, name);
   } catch (error) {
     throw new Error(pbMessage(error, '圖片上傳失敗'));

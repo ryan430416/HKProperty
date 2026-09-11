@@ -50,13 +50,15 @@ export async function addUsage({ propertyId, userName, department, usedAt, purpo
       purpose,
       note: note || null
     })
-    : await hkpPost('/api/hkp/usage', {
+    : await hkpPost('/api/hkproperty/usage', {
     asset_id: item.id,
     user_name: userName,
     department,
     used_at: new Date(usedAt).toISOString(),
     purpose,
-    note: note || null
+    note: note || null,
+    usage_type: 'on_site',
+    idempotency_key: `usage-${item.id}-${usedAt}-${userName}-${Math.random().toString(36).slice(2, 8)}`
   });
   await loadCatalog();
   await loadUsage();

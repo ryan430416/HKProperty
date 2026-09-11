@@ -127,7 +127,9 @@ function canStartBorrow(item) {
   if (item.availabilityStatus === AVAILABILITY.CHECKED_OUT || item.availabilityStatus === AVAILABILITY.OVERDUE) {
     return { ok: false, message: '此財產目前已借出，不可再次借出' };
   }
-  if (item.availabilityStatus === AVAILABILITY.PENDING) return { ok: false, message: '此財產已有待處理的借用申請' };
+  if (item.availabilityStatus === AVAILABILITY.RESERVED || item.availabilityStatus === 'pending') {
+    return { ok: false, message: '此財產已有預借或待處理申請' };
+  }
   return { ok: false, message: '僅可借用狀態的財產才能辦理借出' };
 }
 

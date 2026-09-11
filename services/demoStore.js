@@ -7,28 +7,34 @@ const DATA_KEY = 'hkp-demo-data';
 const DEMO_USERS = {
   admin: {
     id: 'demo-admin',
+    name: '測試管理者',
     display_name: '測試管理者',
     role: 'admin',
     school_number: 'ADMIN001',
     department: '總務處',
+    active: true,
     is_active: true,
     email: 'demo-admin@hk.local'
   },
   staff: {
     id: 'demo-staff',
+    name: '測試經辦',
     display_name: '測試經辦',
     role: 'staff',
     school_number: 'STAFF001',
     department: '總務處',
+    active: true,
     is_active: true,
     email: 'demo-staff@hk.local'
   },
   borrower: {
     id: 'demo-borrower',
+    name: '測試借用人',
     display_name: '測試借用人',
     role: 'borrower',
     school_number: 'B12345678',
     department: '資訊工程系',
+    active: true,
     is_active: true,
     email: 'demo-borrower@hk.local'
   }
@@ -81,12 +87,15 @@ function seedAssets() {
     note: item.note || '',
     brand: item.brand || '',
     model: item.model || '',
+    borrowable: true,
     is_borrowable: true,
+    active: true,
     is_active: true,
     audit_status: AUDIT_STATUS.PENDING,
     last_audit_at: '',
     current_loan: '',
     return_alert: '',
+    image: '',
     photo: ''
   }));
 }
@@ -195,7 +204,7 @@ export function demoSaveSettings(patch) {
 export function demoCheckout(payload) {
   const data = getDemoData();
   const asset = assetById(data, payload.assetId || payload.propertyId);
-  if (!asset || asset.is_active === false) throw new Error('查無此財產編號');
+  if (!asset || asset.active === false || asset.is_active === false) throw new Error('查無此財產編號');
   if (asset.availability_status !== 'available') throw new Error('此財產目前無法借用');
   const open = data.loans.find((row) => row.asset === asset.id && !['returned', 'rejected', 'cancelled'].includes(row.status));
   if (open) throw new Error('此財產已有未完成的借用紀錄，不可重複借出');
@@ -408,6 +417,7 @@ export function demoSetActive(assetId, isActive) {
   const data = getDemoData();
   const asset = assetById(data, assetId);
   if (!asset) throw new Error('找不到財產');
+  asset.active = isActive;
   asset.is_active = isActive;
   saveData(data);
   return asset;
@@ -423,13 +433,14 @@ export async function demoSavePhoto(assetId, file) {
     reader.onerror = () => reject(new Error('讀取圖片失敗'));
     reader.readAsDataURL(file);
   });
+  asset.image = dataUrl;
   asset.photo = dataUrl;
   saveData(data);
   return dataUrl;
 }
 
 export function demoPhotoUrl(row) {
-  return row?.photo || PLACEHOLDER_IMAGE;
+  return row?.image || row?.photo || PLACEHOLDER_IMAGE;
 }
 
 export function demoUpdateMe(patch) {

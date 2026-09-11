@@ -91,7 +91,7 @@ export async function addAudit({ propertyId, registeredLocation, actualLocation,
       note: note || null
     });
   } else {
-    await hkpPost('/api/hkp/audits', {
+    await hkpPost('/api/hkproperty/audits', {
     asset_id: item.id,
     registered_location: registeredLocation,
     actual_location: actualLocation,
@@ -120,7 +120,7 @@ export async function confirmLocationUpdate({ propertyId, fromLocation, toLocati
       reason: reason || `由 ${operator || '管理者'} 更新位置`
     });
   } else {
-    await hkpPost(`/api/hkp/assets/${item.id}/location`, {
+    await hkpPost(`/api/hkproperty/assets/${item.id}/location`, {
     from_location: fromLocation,
     to_location: toLocation,
     reason: reason || `由 ${operator || '管理者'} 更新位置`

@@ -38,13 +38,16 @@ export function getProfile() {
 
 function mapProfile(record) {
   if (!record) return null;
+  const active = record.active !== false && record.is_active !== false;
   return {
     id: record.id,
-    display_name: record.display_name || record.name || String(record.email || '').split('@')[0] || '使用者',
+    display_name: record.name || record.display_name || String(record.email || '').split('@')[0] || '使用者',
+    name: record.name || record.display_name || '',
     school_number: record.school_number || '',
     department: record.department || '',
     role: record.role || ROLES.BORROWER,
-    is_active: record.is_active !== false,
+    is_active: active,
+    active,
     email: record.email || '',
     created_at: record.created,
     updated_at: record.updated
@@ -56,7 +59,7 @@ export async function loadProfile() {
   const record = client.authStore.record;
   currentUser = record || null;
   currentProfile = mapProfile(record);
-  if (currentProfile && !currentProfile.is_active) {
+  if (currentProfile && !currentProfile.active) {
     await signOut();
     throw new Error('此帳號已停用，請聯繫管理者');
   }
@@ -137,9 +140,10 @@ export async function registerWithPassword(email, password) {
       password,
       passwordConfirm: password,
       emailVisibility: true,
-      display_name: trimmed.split('@')[0],
+      name: trimmed.split('@')[0],
+      school_number: `TMP-${Date.now().toString(36)}`,
       role: 'borrower',
-      is_active: true
+      active: true
     });
     await client.collection(PB.users).authWithPassword(trimmed, password);
   } catch (error) {
@@ -175,7 +179,10 @@ export async function verifyEmailOtp(email, token) {
 export async function updateMyProfile(patch) {
   if (isDemoMode()) {
     const next = {};
-    if (patch.displayName != null) next.display_name = String(patch.displayName).trim();
+    if (patch.displayName != null) {
+      next.name = String(patch.displayName).trim();
+      next.display_name = next.name;
+    }
     if (patch.schoolNumber != null) next.school_number = String(patch.schoolNumber).trim();
     if (patch.department != null) next.department = String(patch.department).trim();
     currentProfile = demoUpdateMe(next);
@@ -186,7 +193,7 @@ export async function updateMyProfile(patch) {
   const user = currentUser;
   if (!user) throw new Error('請先登入');
   const payload = {};
-  if (patch.displayName != null) payload.display_name = String(patch.displayName).trim();
+  if (patch.displayName != null) payload.name = String(patch.displayName).trim();
   if (patch.schoolNumber != null) payload.school_number = String(patch.schoolNumber).trim();
   if (patch.department != null) payload.department = String(patch.department).trim();
   try {
@@ -222,9 +229,11 @@ export async function adminUpdateProfile(payload) {
       school_number: payload.schoolNumber ?? null
     });
   }
-  return hkpPost(`/api/hkp/users/${payload.id}`, {
+  return hkpPost(`/api/hkproperty/users/${payload.id}`, {
     role: payload.role ?? null,
+    active: payload.isActive ?? null,
     is_active: payload.isActive ?? null,
+    name: payload.displayName ?? null,
     display_name: payload.displayName ?? null,
     department: payload.department ?? null,
     school_number: payload.schoolNumber ?? null

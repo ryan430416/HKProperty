@@ -15,7 +15,7 @@ import {
 } from './format.js';
 import { bindConfirmDialog, bindDialogBehavior, closeDialog, confirmAction, fillSelect, isSwitchingDialogs, openExclusiveDialog, setLoading, toast } from './ui.js';
 import { bindSelfService, openSelfMode, showHome } from './selfService.js';
-import { parseScanPayload, startCameraScan } from './scanner.js';
+import { parseScanPayload, readAssetDeepLink, startCameraScan } from './scanner.js';
 import {
   AVAILABILITY,
   findByPropertyId,
@@ -1670,7 +1670,29 @@ async function bootApp() {
     await refreshData();
     setLoading(false);
     applyRoleNav();
-    setView(isStaff() ? 'dashboard' : 'selfService');
+    const deep = readAssetDeepLink() || (() => {
+      try {
+        return JSON.parse(sessionStorage.getItem('hkp-pending-asset') || 'null');
+      } catch {
+        return null;
+      }
+    })();
+    sessionStorage.removeItem('hkp-pending-asset');
+    if (deep?.propertyId) {
+      setView('inventory');
+      lookupScan(deep.propertyId);
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('action');
+        url.searchParams.delete('propertyId');
+        url.searchParams.delete('id');
+        window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+      } catch {
+        // ignore
+      }
+    } else {
+      setView(isStaff() ? 'dashboard' : 'selfService');
+    }
     toast(`已載入 ${listItems().length} 筆財產`);
   } catch (error) {
     showLoadError(error.message || '無法載入資料，請重試。');
@@ -1681,6 +1703,10 @@ async function bootApp() {
 async function init() {
   bindEvents();
   $('loadError').hidden = true;
+  const pendingDeep = readAssetDeepLink();
+  if (pendingDeep?.propertyId) {
+    sessionStorage.setItem('hkp-pending-asset', JSON.stringify(pendingDeep));
+  }
   setLoading(true, '檢查登入狀態…');
   await initAuth(async (profile) => {
     if (profile) await bootApp();

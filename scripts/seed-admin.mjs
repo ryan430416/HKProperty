@@ -44,9 +44,10 @@ const user = await pb.collection(PB.users).create({
   passwordConfirm: password,
   emailVisibility: true,
   verified: true,
-  display_name: '測試管理者',
+  name: '測試管理者',
+  school_number: 'ADMIN001',
   role: 'admin',
-  is_active: true,
+  active: true,
   department: '總務處'
 });
 console.log(JSON.stringify({ ok: true, created: true, id: user.id, email: user.email, role: user.role }));

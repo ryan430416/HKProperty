@@ -31,7 +31,7 @@ function isAdmin(auth = authRecord()) {
 }
 
 function displayName(auth = authRecord()) {
-  return auth.display_name || auth.email || '使用者';
+  return auth.name || auth.display_name || auth.email || '使用者';
 }
 
 async function logOp(action, entityType, entityId, assetId, detail) {
@@ -218,6 +218,22 @@ async function completeReturn(id, body) {
 export async function hkpDirect(path, body = {}) {
   const client = requireClient();
   const auth = authRecord();
+  // Normalize new API paths to existing handlers
+  if (path === '/api/hkproperty/loans/checkout') return createLoan({ ...body, checkout_method: body.checkout_method || 'self_service' });
+  if (path === '/api/hkproperty/loans/request') return createLoan({ ...body, force_pending: true });
+  if (path === '/api/hkproperty/loans/return') {
+    return completeReturn(body.loan_id, body);
+  }
+  if (path === '/api/hkproperty/usage') path = '/api/hkp/usage';
+  if (path === '/api/hkproperty/audits') path = '/api/hkp/audits';
+  if (path === '/api/hkproperty/settings') path = '/api/hkp/settings';
+  const propAsset = path.match(/^\/api\/hkproperty\/assets\/([^/]+)\/(location|active)$/);
+  if (propAsset) path = `/api/hkp/assets/${propAsset[1]}/${propAsset[2]}`;
+  const propLoan = path.match(/^\/api\/hkproperty\/loans\/([^/]+)\/(approve|reject)$/);
+  if (propLoan) path = `/api/hkp/loans/${propLoan[1]}/${propLoan[2]}`;
+  const propUser = path.match(/^\/api\/hkproperty\/users\/([^/]+)$/);
+  if (propUser) path = `/api/hkp/users/${propUser[1]}`;
+
   const loanMut = path.match(/^\/api\/hkp\/loans\/([^/]+)\/(approve|reject|checkout|return|return-request)$/);
   if (path === '/api/hkp/loans') return createLoan(body);
   if (loanMut) {

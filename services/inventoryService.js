@@ -8,7 +8,8 @@ import { publicImageUrl, uploadAssetImage } from './storageService.js';
 
 export const AVAILABILITY = {
   AVAILABLE: 'available',
-  PENDING: 'pending',
+  RESERVED: 'reserved',
+  PENDING: 'reserved', // alias — UI 舊碼仍可用
   CHECKED_OUT: 'checked_out',
   OVERDUE: 'overdue',
   MAINTENANCE: 'maintenance',
@@ -17,31 +18,36 @@ export const AVAILABILITY = {
 
 export const AVAILABILITY_LABEL = {
   available: '可借用',
-  pending: '待核准',
+  reserved: '已預借／待處理',
+  pending: '已預借／待處理',
   checked_out: '已借出',
   overdue: '已逾期',
   maintenance: '維修中',
   lost: '異常'
 };
 
-const BASIC_FIELDS = 'id,property_id,name,location,department,specification,unit,availability_status,usage_count,is_borrowable,is_active,current_loan,audit_status,last_audit_at,created,updated,photo';
+const BASIC_FIELDS = 'id,property_id,name,location,department,specification,unit,availability_status,usage_count,borrowable,active,current_loan,audit_status,last_audit_at,created,updated,image';
 
 let cache = [];
 let loaded = false;
 let overdueAssetIds = new Set();
 
 function photoName(row) {
-  if (!row?.photo) return '';
-  if (typeof row.photo === 'string' && row.photo.startsWith('data:')) return row.photo;
-  return Array.isArray(row.photo) ? row.photo[0] : row.photo;
+  const raw = row?.image || row?.photo;
+  if (!raw) return '';
+  if (typeof raw === 'string' && raw.startsWith('data:')) return raw;
+  return Array.isArray(raw) ? raw[0] : raw;
 }
 
 export function mapAsset(row) {
   let availabilityStatus = row.availability_status || AVAILABILITY.AVAILABLE;
+  if (availabilityStatus === 'pending') availabilityStatus = AVAILABILITY.RESERVED;
   if (availabilityStatus === AVAILABILITY.CHECKED_OUT && overdueAssetIds.has(row.id)) {
     availabilityStatus = AVAILABILITY.OVERDUE;
   }
   const filename = photoName(row);
+  const borrowable = row.borrowable !== false && row.is_borrowable !== false;
+  const active = row.active !== false && row.is_active !== false;
   return {
     id: row.id,
     propertyId: String(row.property_id),
@@ -56,12 +62,12 @@ export function mapAsset(row) {
     purchaseDate: row.purchase_date,
     serviceLife: row.service_life,
     supplier: row.supplier,
-    status: row.asset_status === 'normal' ? '正常' : (row.asset_status || '正常'),
+    status: row.asset_status === 'normal' || !row.asset_status ? '正常' : (row.asset_status === 'abnormal' ? '異常' : row.asset_status),
     note: row.note,
     brand: row.brand,
     model: row.model,
-    isBorrowable: row.is_borrowable !== false,
-    isActive: row.is_active !== false,
+    isBorrowable: borrowable,
+    isActive: active,
     useCount: Number(row.usage_count || 0),
     lastAuditAt: row.last_audit_at || null,
     auditStatus: row.audit_status || AUDIT_STATUS.PENDING,
@@ -101,7 +107,7 @@ export async function loadCatalog() {
   try {
     const options = { sort: 'property_id' };
     if (!staff) {
-      options.filter = 'is_active = true';
+      options.filter = 'active = true';
       options.fields = BASIC_FIELDS;
     }
     const data = await client.collection(PB.assets).getFullList(options);
@@ -137,34 +143,28 @@ export function getFilterOptions() {
   return {
     locations: unique('location'),
     departments: unique('department'),
-    statuses: unique('status'),
-    auditStatuses: [...new Set(items.map((item) => item.auditStatus))].sort((a, b) => a.localeCompare(b, 'zh-Hant'))
+    statuses: unique('availabilityStatus')
   };
 }
 
-export function locationRanking(limit = 10) {
-  const counts = new Map();
+export function locationRanking() {
+  const map = new Map();
   for (const item of listItems()) {
-    const key = item.location || '未提供';
-    counts.set(key, (counts.get(key) || 0) + 1);
+    const key = item.location || '未設定';
+    map.set(key, (map.get(key) || 0) + 1);
   }
-  return [...counts.entries()]
+  return [...map.entries()]
     .map(([location, count]) => ({ location, count }))
-    .sort((a, b) => b.count - a.count || a.location.localeCompare(b.location, 'zh-Hant'))
-    .slice(0, limit);
+    .sort((a, b) => b.count - a.count || a.location.localeCompare(b.location, 'zh-Hant'));
 }
 
 export function getStats() {
   const items = listItems();
   return {
     total: items.length,
-    done: items.filter((item) => item.auditStatus === AUDIT_STATUS.DONE).length,
-    pending: items.filter((item) => item.auditStatus === AUDIT_STATUS.PENDING).length,
-    mismatch: items.filter((item) => (
-      item.auditStatus === AUDIT_STATUS.MISMATCH || item.auditStatus === AUDIT_STATUS.MISSING
-    )).length,
     available: items.filter((item) => item.availabilityStatus === AVAILABILITY.AVAILABLE).length,
-    approvalPending: items.filter((item) => item.availabilityStatus === AVAILABILITY.PENDING).length,
+    reserved: items.filter((item) => item.availabilityStatus === AVAILABILITY.RESERVED).length,
+    approvalPending: items.filter((item) => item.availabilityStatus === AVAILABILITY.RESERVED).length,
     checkedOut: items.filter((item) => item.availabilityStatus === AVAILABILITY.CHECKED_OUT).length,
     overdue: items.filter((item) => item.availabilityStatus === AVAILABILITY.OVERDUE).length,
     maintenance: items.filter((item) => item.availabilityStatus === AVAILABILITY.MAINTENANCE).length,
@@ -185,9 +185,7 @@ export async function setAssetActive(propertyId, isActive) {
   const item = getItem(propertyId);
   if (!item) throw new Error('找不到財產');
   if (isDemoMode()) demoSetActive(item.id, isActive);
-  else await hkpPost(`/api/hkp/assets/${item.id}/active`, { is_active: isActive });
+  else await hkpPost(`/api/hkproperty/assets/${item.id}/active`, { active: isActive, is_active: isActive });
   await loadCatalog();
   return getItem(propertyId);
 }
-
-export { PLACEHOLDER_IMAGE };

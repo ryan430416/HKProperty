@@ -49,8 +49,8 @@ function mapItem(item) {
     note: item.note || '',
     brand: item.brand || '',
     model: item.model || '',
-    is_borrowable: true,
-    is_active: true,
+    borrowable: true,
+    active: true,
     audit_status: '待盤點'
   };
   if (item.purchaseDate) row.purchase_date = item.purchaseDate;

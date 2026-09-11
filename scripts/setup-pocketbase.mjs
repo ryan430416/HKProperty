@@ -6,7 +6,6 @@ import { COLLECTIONS, PB } from '../pocketbase/schema.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OWNED = new Set(COLLECTIONS.map((item) => item.name));
-const FORBIDDEN = new Set(['users', 'HKProperty']);
 
 function loadEnvFile(name) {
   const path = join(root, name);
@@ -42,17 +41,17 @@ async function authAdmin() {
     await pb.collection('_superusers').authWithPassword(adminEmail, adminPassword);
     return;
   } catch {
-    // PocketBase 0.22 以前
+    // older PocketBase
   }
   if (pb.admins?.authWithPassword) {
     await pb.admins.authWithPassword(adminEmail, adminPassword);
     return;
   }
-  throw new Error('管理者登入失敗，請確認 PocketBase 網址與帳密正確');
+  throw new Error('管理者登入失敗');
 }
 
 function withRelationIds(fields, byName) {
-  return fields.map((field) => {
+  return (fields || []).map((field) => {
     if (field.type !== 'relation') return { ...field };
     const { collectionName, ...rest } = field;
     const collectionId = byName[collectionName];
@@ -65,8 +64,10 @@ function mergeFields(existingFields, desiredFields) {
   const current = (existingFields || []).slice();
   const names = new Set(current.map((field) => field.name));
   const added = [];
-  for (const field of desiredFields) {
-    if (names.has(field.name) || field.name === 'id' || field.name === 'created' || field.name === 'updated') continue;
+  for (const field of desiredFields || []) {
+    if (names.has(field.name) || ['id', 'created', 'updated', 'password', 'tokenKey', 'email', 'emailVisibility', 'verified'].includes(field.name)) {
+      continue;
+    }
     current.push(field);
     added.push(field.name);
   }
@@ -74,9 +75,7 @@ function mergeFields(existingFields, desiredFields) {
 }
 
 async function ensureCollection(payload) {
-  if (FORBIDDEN.has(payload.name) || !OWNED.has(payload.name)) {
-    throw new Error(`拒絕修改非本系統集合：${payload.name}`);
-  }
+  if (!OWNED.has(payload.name)) throw new Error(`拒絕修改非本系統集合：${payload.name}`);
   const existing = await pb.collections.getFullList();
   const found = existing.find((item) => item.name === payload.name);
   if (!found) {
@@ -90,7 +89,7 @@ async function ensureCollection(payload) {
     return { action: 'created', name: payload.name };
   }
   const { fields, added } = mergeFields(found.fields || found.schema || [], payload.fields || []);
-  await pb.collections.update(found.id, {
+  const patch = {
     listRule: payload.listRule,
     viewRule: payload.viewRule,
     createRule: payload.createRule,
@@ -98,21 +97,59 @@ async function ensureCollection(payload) {
     deleteRule: payload.deleteRule,
     indexes: payload.indexes || found.indexes || [],
     fields
-  });
+  };
+  try {
+    await pb.collections.update(found.id, patch);
+  } catch (error) {
+    // Older rule syntax fallback for users.updateRule
+    if (payload.name === PB.users) {
+      patch.updateRule = `(@request.auth.id = id) || (@request.auth.role = "admin")`;
+      await pb.collections.update(found.id, patch);
+    } else {
+      throw error;
+    }
+  }
   console.log(`updated ${payload.name}${added.length ? ` +fields ${added.join(',')}` : ''}`);
   return { action: 'updated', name: payload.name, added };
 }
 
 await authAdmin();
 
+// Guard: refuse to mutate a shared "users" collection from another app
+{
+  const all = await pb.collections.getFullList();
+  const users = all.find((item) => item.name === 'users');
+  if (users) {
+    const fieldNames = new Set((users.fields || users.schema || []).map((f) => f.name));
+    const roleField = (users.fields || users.schema || []).find((f) => f.name === 'role');
+    const foreign = fieldNames.has('gender') || fieldNames.has('program') || fieldNames.has('nickname')
+      || (roleField?.values || []).some((v) => v === 'volunteer' || v === 'teacher');
+    if (foreign) {
+      console.error(JSON.stringify({
+        ok: false,
+        error: '偵測到共用的 users 集合（含其他專案欄位）。請改用獨立 PocketBase 實例後再執行 setup，以免破壞其他系統。',
+        hint: '本機可用 .\\pocketbase.exe serve 建立新的 pb_data'
+      }, null, 2));
+      process.exit(1);
+    }
+  }
+}
+
 const created = [];
-const skippedForeign = (await pb.collections.getFullList())
-  .map((item) => item.name)
-  .filter((name) => !OWNED.has(name));
 
 for (const collection of COLLECTIONS) {
   const all = await pb.collections.getFullList();
   const byName = Object.fromEntries(all.map((item) => [item.name, item.id]));
+  // users auth collection may already exist — ensure it is in byName before relations
+  if (collection.name === PB.users && !byName[PB.users]) {
+    // will create below
+  }
+  const fields = withRelationIds(collection.fields, {
+    ...byName,
+    ...(collection.name === PB.users ? {} : {})
+  });
+  // For first pass, skip relation fields that target collections not yet created
+  const safeFields = fields.filter((field) => field.type !== 'relation' || field.collectionId);
   const payload = {
     name: collection.name,
     type: collection.type,
@@ -122,29 +159,41 @@ for (const collection of COLLECTIONS) {
     updateRule: collection.updateRule,
     deleteRule: collection.deleteRule,
     indexes: collection.indexes || [],
-    fields: withRelationIds(collection.fields, byName)
+    fields: safeFields
   };
   created.push(await ensureCollection(payload));
 }
 
+// Second pass: add relations now that all collections exist
+const afterPass1 = await pb.collections.getFullList();
+const byName = Object.fromEntries(afterPass1.map((item) => [item.name, item.id]));
+for (const collection of COLLECTIONS) {
+  const found = afterPass1.find((item) => item.name === collection.name);
+  if (!found) continue;
+  const desired = withRelationIds(collection.fields, byName);
+  const { fields, added } = mergeFields(found.fields || [], desired);
+  if (!added.length && !(desired.some((f) => f.type === 'relation'))) continue;
+  await pb.collections.update(found.id, { fields });
+  if (added.length) console.log(`relations ${collection.name}: ${added.join(',')}`);
+}
+
 const after = await pb.collections.getFullList();
-const byName = Object.fromEntries(after.map((item) => [item.name, item.id]));
+const ids = Object.fromEntries(after.map((item) => [item.name, item.id]));
 const assets = after.find((item) => item.name === PB.assets);
-const hasCurrentLoan = (assets.fields || []).some((field) => field.name === 'current_loan');
-if (!hasCurrentLoan) {
+if (assets && !(assets.fields || []).some((field) => field.name === 'current_loan')) {
   await pb.collections.update(assets.id, {
     fields: [
       ...(assets.fields || []),
       {
         name: 'current_loan',
         type: 'relation',
-        collectionId: byName[PB.loans],
+        collectionId: ids[PB.loans],
         maxSelect: 1,
         cascadeDelete: false
       }
     ]
   });
-  console.log(`added ${PB.assets}.current_loan`);
+  console.log('added assets.current_loan');
 }
 
 const settings = await pb.collection(PB.settings).getFullList();
@@ -154,14 +203,13 @@ if (!settings.length) {
     allow_self_checkout: true,
     default_loan_days: 1
   });
-  console.log(`seeded ${PB.settings}`);
+  console.log('seeded system_settings');
 }
 
 console.log(JSON.stringify({
   ok: true,
   url,
   owned: [...OWNED],
-  skippedForeign,
   result: created,
   collections: (await pb.collections.getFullList()).map((item) => item.name)
 }, null, 2));
