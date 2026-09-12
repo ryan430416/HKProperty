@@ -13,7 +13,7 @@ import {
   auditStatusClass,
   availabilityClass
 } from './format.js';
-import { bindConfirmDialog, bindDialogBehavior, closeDialog, confirmAction, fillSelect, isSwitchingDialogs, openExclusiveDialog, setLoading, toast } from './ui.js';
+import { bindConfirmDialog, bindDialogBehavior, closeAllDialogs, closeDialog, confirmAction, fillSelect, isSwitchingDialogs, openExclusiveDialog, setLoading, toast } from './ui.js';
 import { bindSelfService, openSelfMode, showHome } from './selfService.js';
 import { parseScanPayload, readAssetDeepLink, startCameraScan, stopCameraScan } from './scanner.js';
 import {
@@ -84,10 +84,16 @@ import {
   rejectReservation
 } from '../services/reservationService.js';
 import { clearLegacyLocalData, detectLegacyLocalData } from '../services/legacyLocalData.js';
+import { clearInventoryCache } from '../services/inventoryService.js';
+import { clearUsageCache } from '../services/usageService.js';
+import { clearAuditCache } from '../services/auditService.js';
+import { clearLoanCache } from '../services/loanService.js';
+import { clearReservationCache } from '../services/reservationService.js';
 import {
-  backendStatusLabel,
+  appModeCopy,
+  beginModeCheck,
+  getAppMode,
   getBackendStatus,
-  isFormalPocketBaseMode,
   markDemoBackend,
   probePocketBase,
   requirePocketBaseReady
@@ -148,22 +154,35 @@ async function refreshData() {
   refreshOverdueStatus();
 }
 
+function modeBannerMode(appMode = getAppMode()) {
+  if (appMode === 'official') return 'connected';
+  if (appMode === 'test') return 'demo';
+  if (appMode === 'offline') return 'failed';
+  return 'checking';
+}
+
 function updateBackendStatusUi() {
   const status = getBackendStatus();
-  const label = backendStatusLabel(status);
-  const detail = status.message ? `${label}｜${status.message}` : label;
+  const appMode = getAppMode();
+  const label = appModeCopy(appMode);
+  const detail = appMode === 'offline' && status.message ? `${label}｜${status.message}` : label;
   const banner = $('backendStatusBanner');
   const text = $('backendStatusText');
+  const cssMode = modeBannerMode(appMode);
   if (banner && text) {
-    banner.dataset.mode = status.mode;
+    banner.dataset.mode = cssMode;
     text.textContent = detail;
   }
   const authStatus = $('authBackendStatus');
   if (authStatus) {
-    authStatus.dataset.mode = status.mode;
+    authStatus.dataset.mode = cssMode;
     authStatus.textContent = detail;
   }
-  if ($('demoBanner')) $('demoBanner').hidden = status.mode !== 'demo';
+  if ($('demoBanner')) {
+    $('demoBanner').hidden = appMode !== 'test';
+    if (appMode === 'test') $('demoBanner').textContent = label;
+  }
+  if ($('sideFoot')) $('sideFoot').textContent = label;
 }
 
 function applyRoleNav() {
@@ -181,13 +200,6 @@ function applyRoleNav() {
   $('userAvatar').textContent = (profile?.display_name || '用').slice(0, 1);
   $('logoutBtn').hidden = !profile;
   document.body.classList.toggle('borrower-view', Boolean(profile) && !staff);
-  if ($('sideFoot')) {
-    $('sideFoot').textContent = demo
-      ? '測試模式：資料只存在此瀏覽器，關閉分頁後會消失'
-      : isFormalPocketBaseMode()
-        ? '正式模式：借用／預借／使用／歸還會寫入 PocketBase'
-        : '資料儲存在雲端資料庫，可在不同裝置同步';
-  }
   updateBackendStatusUi();
 }
 
@@ -290,6 +302,7 @@ function loanDueText(item) {
 }
 
 function setView(view) {
+  stopCameraScan();
   refreshOverdueStatus();
   const previous = state.view;
   state.view = view;
@@ -1207,6 +1220,9 @@ function downloadCsv() {
 }
 
 function bindEvents() {
+  window.addEventListener('pagehide', () => {
+    stopCameraScan();
+  });
   bindDialogBehavior(restoreDetailAfterClose);
   bindConfirmDialog();
   bindSelfService({
@@ -1556,7 +1572,10 @@ function bindEvents() {
     event.preventDefault();
     const btn = $('usageSubmitBtn');
     if (btn?.disabled) return;
-    if (btn) btn.disabled = true;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '登記中…';
+    }
     try {
       const { item } = await addUsage({
         propertyId: $('usagePropertyId').value,
@@ -1572,7 +1591,10 @@ function bindEvents() {
     } catch (error) {
       toast(error.message || '現場使用登記失敗', 'error');
     } finally {
-      if (btn) btn.disabled = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '確認登記';
+      }
     }
   });
 
@@ -1802,10 +1824,28 @@ function bindEvents() {
     }
   });
   $('logoutBtn').addEventListener('click', async () => {
+    await stopCameraScan();
+    closeAllDialogs();
     await signOut();
+    ['usageForm', 'reservationForm', 'loanForm', 'checkoutForm', 'returnForm', 'auditForm', 'profileForm'].forEach((id) => {
+      const el = $(id);
+      if (el?.tagName === 'FORM') el.reset();
+    });
+    if ($('scanCode')) $('scanCode').value = '';
+    state.pendingImage = '';
+    state.pendingCheckout = null;
+    state.returnToDetailId = null;
+    clearInventoryCache();
+    clearUsageCache();
+    clearAuditCache();
+    clearLoanCache();
+    clearReservationCache();
+    beginModeCheck();
     applyRoleNav();
     showAuthGate(true);
     toast('已登出');
+    await probePocketBase();
+    applyRoleNav();
   });
   $('profileForm').addEventListener('submit', async (event) => {
     event.preventDefault();

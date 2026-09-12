@@ -55,6 +55,10 @@ export function mapReservation(row) {
   };
 }
 
+export function clearReservationCache() {
+  cache = [];
+}
+
 export async function loadReservations() {
   if (isDemoMode()) {
     cache = demoReservations().map(mapReservation);
@@ -84,6 +88,10 @@ export function listManageReservations() {
 export async function createReservation(payload) {
   const item = getItem(payload.propertyId);
   if (!item) throw new Error('找不到財產');
+  if (!String(payload.purpose || '').trim()) throw new Error('請填寫預約用途');
+  if (!payload.startAt || !payload.endAt) throw new Error('請填寫預約起迄時間');
+  if (new Date(payload.endAt) <= new Date(payload.startAt)) throw new Error('預約結束時間必須晚於開始時間');
+  if (new Date(payload.startAt).getTime() < Date.now() - 60_000) throw new Error('不可預約過去時間');
   const body = {
     asset_id: item.id,
     purpose: payload.purpose,

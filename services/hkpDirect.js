@@ -1,5 +1,5 @@
 import { PB } from '../pocketbase/schema.mjs';
-import { requireClient } from './pocketbaseClient.js';
+import { pbMessage, requireClient } from './pocketbaseClient.js';
 
 function relationId(value) {
   if (!value) return '';
@@ -66,6 +66,57 @@ async function recountUsage(assetId) {
     fields: 'id'
   });
   return Math.max(0, rows.length);
+}
+
+async function syncUsageCount(assetId) {
+  const counted = await recountUsage(assetId);
+  if (!isStaff()) return counted;
+  try {
+    await requireClient().collection(PB.assets).update(assetId, { usage_count: counted });
+  } catch (error) {
+    console.error('[HKProperty PocketBase]', {
+      scope: 'usage_count',
+      status: error?.status || null,
+      message: error?.message || '無法同步使用次數'
+    });
+  }
+  return counted;
+}
+
+async function createUsageRecord(asset, extra = {}) {
+  const client = requireClient();
+  const auth = authRecord();
+  const payload = {
+    asset: asset.id,
+    user_name: trim(extra.user_name),
+    user_number: trim(extra.user_number),
+    department: trim(extra.department),
+    used_at: extra.used_at,
+    purpose: trim(extra.purpose),
+    note: trim(extra.note),
+    created_by: auth.id,
+    user: auth.id,
+    property_id: asset.property_id || '',
+    property_name: asset.name || ''
+  };
+  if (extra.loan) payload.loan = extra.loan;
+  const optional = ['user_number', 'user', 'property_id', 'property_name', 'loan'];
+  let lastError;
+  for (let attempt = 0; attempt < optional.length + 1; attempt += 1) {
+    try {
+      return await client.collection(PB.usage).create(payload);
+    } catch (error) {
+      lastError = error;
+      const fields = Object.keys(error?.data?.data || {});
+      const unknown = fields.find((field) => optional.includes(field) && payload[field] != null);
+      if ((error?.status === 400 || error?.data?.code === 400) && unknown) {
+        delete payload[unknown];
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError;
 }
 
 async function requireAsset(id) {
@@ -141,21 +192,16 @@ async function createLoan(body) {
     current_loan: rec.id
   });
   if (!pending) {
-    await client.collection(PB.usage).create({
-      asset: asset.id,
+    await createUsageRecord(asset, {
       loan: rec.id,
       user_name: rec.borrower_name,
       user_number: rec.borrower_number,
       department: rec.borrower_department,
       used_at: checkoutAt,
       purpose: rec.purpose,
-      note: `借用編號 ${rec.loan_number}`,
-      created_by: auth.id
+      note: `借用編號 ${rec.loan_number}`
     });
-    if (isStaff(auth)) {
-      const counted = await recountUsage(asset.id);
-      await client.collection(PB.assets).update(asset.id, { usage_count: counted });
-    }
+    await syncUsageCount(asset.id);
     await logOp('借出', 'loan', rec.id, asset.id, { loan_number: rec.loan_number });
   } else {
     await logOp('借用申請', 'loan', rec.id, asset.id, { loan_number: rec.loan_number });
@@ -178,19 +224,18 @@ async function completeCheckout(id) {
   const asset = await requireAsset(assetId);
   await client.collection(PB.assets).update(asset.id, {
     availability_status: 'checked_out',
-    current_loan: rec.id,
-    usage_count: Number(asset.usage_count || 0) + 1
+    current_loan: rec.id
   });
-  await client.collection(PB.usage).create({
-    asset: asset.id,
+  await createUsageRecord(asset, {
     loan: rec.id,
     user_name: rec.borrower_name,
+    user_number: rec.borrower_number,
     department: rec.borrower_department,
     used_at: now,
     purpose: rec.purpose,
-    note: `借用編號 ${rec.loan_number}`,
-    created_by: auth.id
+    note: `借用編號 ${rec.loan_number}`
   });
+  await syncUsageCount(asset.id);
   await logOp('借出', 'loan', rec.id, asset.id, { loan_number: rec.loan_number });
   return updated;
 }
@@ -242,6 +287,19 @@ function overlaps(startAt, endAt, otherStart, otherEnd) {
     && new Date(endAt).getTime() > new Date(otherStart).getTime();
 }
 
+async function activeReservationSlots(assetId) {
+  const client = requireClient();
+  const filter = `asset = "${assetId}" && (status = "pending" || status = "approved")`;
+  try {
+    return await client.collection(PB.reservationSlots).getFullList({ filter });
+  } catch (error) {
+    const status = error?.status || error?.data?.code;
+    if (status !== 404) throw error;
+    if (!isStaff()) throw new Error('無法向 PocketBase 查詢預約衝突，已停止送出');
+    return client.collection(PB.reservations).getFullList({ filter });
+  }
+}
+
 async function createReservation(body) {
   const client = requireClient();
   const auth = authRecord();
@@ -249,13 +307,15 @@ async function createReservation(body) {
   if (!trim(body.purpose)) throw new Error('請填寫預約用途');
   if (!body.start_at || !body.end_at) throw new Error('請填寫預約起迄時間');
   if (new Date(body.end_at) <= new Date(body.start_at)) throw new Error('預約結束時間必須晚於開始時間');
+  if (new Date(body.start_at).getTime() < Date.now() - 60_000) throw new Error('不可預約過去時間');
+  const assetStatus = String(asset.asset_status || '').toLowerCase();
+  if (assetStatus && assetStatus !== 'normal' && assetStatus !== '正常') throw new Error('此財產不是正常狀態，無法預約');
   if (asset.is_borrowable === false) throw new Error('此財產不可借用');
-  if (['maintenance', 'lost', 'checked_out', 'overdue'].includes(asset.availability_status)) {
+  if (asset.availability_status === 'maintenance') throw new Error('此財產維修中，無法預約');
+  if (['lost', 'checked_out', 'overdue'].includes(asset.availability_status)) {
     throw new Error('此財產目前不可預約');
   }
-  const existing = await client.collection(PB.reservations).getFullList({
-    filter: `asset = "${asset.id}" && (status = "pending" || status = "approved")`
-  });
+  const existing = await activeReservationSlots(asset.id);
   if (existing.some((row) => overlaps(body.start_at, body.end_at, row.start_at, row.end_at))) {
     throw new Error('此時段已有其他待審或已核准的預約');
   }
@@ -284,10 +344,8 @@ async function approveReservation(id) {
   if (!isStaff(auth)) throw new Error('沒有核准預約的權限');
   const rec = await client.collection(PB.reservations).getOne(id);
   if (rec.status !== 'pending') throw new Error('僅能核准待審核的預約');
-  const others = await client.collection(PB.reservations).getFullList({
-    filter: `asset = "${relationId(rec.asset)}" && status = "approved" && id != "${rec.id}"`
-  });
-  if (others.some((row) => overlaps(rec.start_at, rec.end_at, row.start_at, row.end_at))) {
+  const others = await activeReservationSlots(relationId(rec.asset));
+  if (others.some((row) => row.id !== rec.id && overlaps(rec.start_at, rec.end_at, row.start_at, row.end_at))) {
     throw new Error('此時段已有衝突的預約');
   }
   const updated = await client.collection(PB.reservations).update(id, {
@@ -313,11 +371,12 @@ async function cancelReservation(id) {
   const auth = authRecord();
   const rec = await client.collection(PB.reservations).getOne(id);
   if (!isStaff(auth) && relationId(rec.user) !== auth.id) throw new Error('只能取消自己的預借');
-  if (!['pending', 'approved'].includes(rec.status)) throw new Error('此預約目前無法取消');
+  if (!isStaff(auth) && rec.status !== 'pending') throw new Error('只能取消自己仍在待審核的預借');
+  if (isStaff(auth) && !['pending', 'approved'].includes(rec.status)) throw new Error('此預約目前無法取消');
   return client.collection(PB.reservations).update(id, { status: 'cancelled' });
 }
 
-export async function hkpDirect(path, body = {}) {
+async function runHkpDirect(path, body = {}) {
   const client = requireClient();
   const auth = authRecord();
   // Normalize new API paths to existing handlers
@@ -370,37 +429,15 @@ export async function hkpDirect(path, body = {}) {
     if (trim(body.user_number).length < 4) throw new Error('學號或教職員編號至少 4 個字元');
     if (!trim(body.purpose)) throw new Error('請填寫使用用途');
     if (!body.used_at) throw new Error('請填寫使用時間');
-    const payload = {
-      asset: asset.id,
-      user_name: trim(body.user_name),
-      department: trim(body.department),
+    const rec = await createUsageRecord(asset, {
+      user_name: body.user_name,
+      user_number: body.user_number,
+      department: body.department,
       used_at: body.used_at,
-      purpose: trim(body.purpose),
-      note: trim(body.note),
-      created_by: auth.id,
-      user_number: trim(body.user_number)
-    };
-    let rec;
-    try {
-      rec = await client.collection(PB.usage).create(payload);
-    } catch (error) {
-      delete payload.user_number;
-      rec = await client.collection(PB.usage).create(payload);
-      if (error) {
-        console.error('[HKProperty PocketBase]', { scope: 'usage.user_number', message: error.message });
-      }
-    }
-    const counted = await recountUsage(asset.id);
-    try {
-      await client.collection(PB.assets).update(asset.id, { usage_count: counted });
-    } catch (error) {
-      console.error('[HKProperty PocketBase]', {
-        scope: 'usage_count',
-        url: `${requireClient().baseUrl}/api/collections/${PB.assets}/records/${asset.id}`,
-        collection: PB.assets,
-        message: error?.message
-      });
-    }
+      purpose: body.purpose,
+      note: body.note
+    });
+    const counted = await syncUsageCount(asset.id);
     return { ...rec, usage_count: counted };
   }
   if (path === '/api/hkp/audits') {
@@ -482,4 +519,13 @@ export async function hkpDirect(path, body = {}) {
     return updated;
   }
   throw new Error(`找不到 API：${path}`);
+}
+
+export async function hkpDirect(path, body = {}) {
+  try {
+    return await runHkpDirect(path, body);
+  } catch (error) {
+    if (error?.status || error?.data?.code) throw new Error(pbMessage(error));
+    throw error;
+  }
 }

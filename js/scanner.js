@@ -50,6 +50,12 @@ export async function stopCameraScan() {
   }
 }
 
+function cameraDeniedError() {
+  const err = new Error('無法使用相機，請允許相機權限或改用手動輸入財產編號。');
+  err.code = 'permission_denied';
+  return err;
+}
+
 function preferBackCamera(devices) {
   const list = Array.isArray(devices) ? devices : [];
   return list.find((d) => /back|rear|environment|後|后/i.test(d.label || '')) || list[0] || null;
@@ -69,6 +75,7 @@ async function startWithBarcodeDetector(videoEl, onDetected) {
   });
   videoEl.srcObject = stream;
   videoEl.setAttribute('playsinline', 'true');
+  videoEl.setAttribute('autoplay', 'true');
   videoEl.muted = true;
   await videoEl.play();
 
@@ -130,21 +137,33 @@ async function startWithHtml5Qrcode(containerId, onDetected) {
   };
   activeStop = stop;
 
-  const cameras = await Html5Qrcode.getCameras();
-  const preferred = preferBackCamera(cameras);
-  if (!preferred?.id) throw new Error('找不到可用相機');
-
-  await scanner.start(
-    preferred.id,
-    { fps: 8, qrbox: { width: 240, height: 240 }, aspectRatio: 1 },
-    async (decoded) => {
-      const propertyId = parseScanPayload(decoded);
-      if (!propertyId || closed) return;
-      await stopCameraScan();
-      onDetected(propertyId, decoded);
-    },
-    () => {}
-  );
+  const config = {
+    fps: 8,
+    qrbox: { width: 240, height: 240 },
+    aspectRatio: 1,
+    videoConstraints: { facingMode: { ideal: 'environment' }, audio: false }
+  };
+  const onSuccess = async (decoded) => {
+    const propertyId = parseScanPayload(decoded);
+    if (!propertyId || closed) return;
+    await stopCameraScan();
+    onDetected(propertyId, decoded);
+  };
+  try {
+    await scanner.start({ facingMode: 'environment' }, config, onSuccess, () => {});
+  } catch (error) {
+    if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError') throw error;
+    const cameras = await Html5Qrcode.getCameras();
+    const preferred = preferBackCamera(cameras);
+    if (!preferred?.id) throw error;
+    await scanner.start(preferred.id, config, onSuccess, () => {});
+  }
+  document.querySelectorAll(`#${containerId} video`).forEach((video) => {
+    video.setAttribute('autoplay', 'true');
+    video.setAttribute('muted', 'true');
+    video.setAttribute('playsinline', 'true');
+    video.muted = true;
+  });
   return { engine: 'html5-qrcode', stop };
 }
 
@@ -171,9 +190,7 @@ export async function startCameraScan({ videoEl, fallbackContainerId, onDetected
     } catch (error) {
       await stopCameraScan();
       if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError') {
-        const err = new Error('已拒絕相機權限，請改以手動輸入財產編號。');
-        err.code = 'permission_denied';
-        throw err;
+        throw cameraDeniedError();
       }
       // fall through to html5-qrcode
     }
@@ -188,9 +205,7 @@ export async function startCameraScan({ videoEl, fallbackContainerId, onDetected
   } catch (error) {
     await stopCameraScan();
     if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError' || /Permission|permission|NotAllowed/i.test(error?.message || '')) {
-      const err = new Error('已拒絕相機權限，請改以手動輸入財產編號。');
-      err.code = 'permission_denied';
-      throw err;
+      throw cameraDeniedError();
     }
     throw new Error(error?.message || '無法啟動相機掃描');
   }

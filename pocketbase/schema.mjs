@@ -20,7 +20,8 @@ export const PB = {
   audits: 'hkp_inventory_audits',
   locations: 'hkp_location_history',
   logs: 'hkp_operation_logs',
-  settings: 'hkp_system_settings'
+  settings: 'hkp_system_settings',
+  reservationSlots: 'hkp_reservation_slots'
 };
 
 export const ROLES = ['borrower', 'staff', 'admin'];

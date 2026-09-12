@@ -145,6 +145,11 @@ async function overlayUsageCounts(client) {
   }
 }
 
+export function clearInventoryCache() {
+  cache = [];
+  loaded = false;
+}
+
 export function isCatalogLoaded() {
   return loaded;
 }

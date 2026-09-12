@@ -33,7 +33,6 @@ export function logPocketBaseError(scope, error, extra = {}) {
     url: pb?.baseUrl || url,
     status: error?.status || error?.data?.code || null,
     message: error?.message || String(error),
-    data: error?.data || error?.response || null,
     ...extra
   };
   console.error('[HKProperty PocketBase]', payload);
@@ -41,12 +40,23 @@ export function logPocketBaseError(scope, error, extra = {}) {
 }
 
 export function pbMessage(error, fallback = '資料庫操作失敗') {
+  const status = error?.status || error?.data?.code;
   const data = error?.data || error?.response;
-  const detail = data?.message || error?.message || fallback;
-  if (error?.name === 'TypeError' || /Failed to fetch|NetworkError|Load failed/i.test(detail)) {
-    return `PocketBase 尚未連線：Failed to fetch（${url}）。請確認 VITE_POCKETBASE_URL、HTTPS 與 CORS。`;
+  const raw = data?.message || error?.message || fallback;
+  if (status === 401) return '登入已失效，請重新登入';
+  if (status === 403) return '此帳號沒有執行此操作的權限';
+  if (status === 404) return '找不到指定資料或 Collection';
+  if (status === 400) {
+    const fields = data?.data && typeof data.data === 'object' ? Object.keys(data.data).filter((key) => key !== 'password').join('、') : '';
+    return fields ? `資料格式錯誤，請檢查必填欄位：${fields}` : '資料格式錯誤，請檢查必填欄位';
   }
-  return detail;
+  if (error?.name === 'TypeError' || /Failed to fetch|NetworkError|Load failed/i.test(raw)) {
+    return '無法連接 PocketBase，請檢查網路、HTTPS 或 CORS';
+  }
+  if (!raw || /^(something went wrong|error|failed)$/i.test(String(raw).trim())) {
+    return fallback;
+  }
+  return raw;
 }
 
 export { getPocketBaseConfigError as getSupabaseConfigError };

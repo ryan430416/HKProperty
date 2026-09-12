@@ -148,6 +148,10 @@ export async function saveSettings(patch) {
   return settings;
 }
 
+export function clearLoanCache() {
+  cache = [];
+}
+
 export async function loadLoans() {
   if (isDemoMode()) {
     cache = demoLoans().map(mapLoan);

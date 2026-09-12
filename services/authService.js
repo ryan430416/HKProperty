@@ -1,6 +1,6 @@
 import { PB } from '../pocketbase/schema.mjs';
 import { demoProfile, demoUpdateMe, demoUpdateUser, demoUsers, enterDemo, exitDemo } from './demoStore.js';
-import { getPocketBaseConfigError, pbMessage, requireClient } from './pocketbaseClient.js';
+import { getPocketBaseConfigError, pb, pbMessage, requireClient } from './pocketbaseClient.js';
 import { hkpPost } from './hkpApi.js';
 
 let currentUser = null;
@@ -243,14 +243,12 @@ export async function adminUpdateProfile(payload) {
 }
 
 export async function signOut() {
-  if (demoProfile()) {
-    exitDemo();
-    currentUser = null;
-    currentProfile = null;
-    return;
-  }
-  const client = requireClient();
-  client.authStore.clear();
+  const demo = Boolean(demoProfile());
   currentUser = null;
   currentProfile = null;
+  if (demo) {
+    exitDemo();
+    return;
+  }
+  pb.authStore.clear();
 }

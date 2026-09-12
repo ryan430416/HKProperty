@@ -37,6 +37,11 @@ export function mapLocation(row, item) {
   };
 }
 
+export function clearAuditCache() {
+  auditCache = [];
+  locationCache = [];
+}
+
 export async function loadAudits() {
   if (isDemoMode()) {
     auditCache = demoAudits().map((row) => mapAudit(row, getItem(relationId(row.asset))));

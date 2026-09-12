@@ -65,6 +65,7 @@ export function enterDemo(role = 'admin') {
 
 export function exitDemo() {
   sessionStorage.removeItem(AUTH_KEY);
+  sessionStorage.removeItem(DATA_KEY);
 }
 
 function seedAssets() {
@@ -190,6 +191,11 @@ export function demoReservations() {
   return Array.isArray(getDemoData().reservations) ? getDemoData().reservations.slice() : [];
 }
 
+function syncDemoUsageCount(data, asset) {
+  if (!asset) return;
+  asset.usage_count = (data.usage || []).filter((row) => row.asset === asset.id).length;
+}
+
 function nextReservationNumber(data) {
   const prefix = `RSV${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-`;
   const same = (data.reservations || []).filter((row) => String(row.reservation_number || '').startsWith(prefix));
@@ -207,10 +213,14 @@ export function demoCreateReservation(payload) {
   if (!asset || asset.active === false) throw new Error('找不到財產');
   if (asset.borrowable === false) throw new Error('此財產不可借用');
   if (['maintenance', 'lost'].includes(asset.availability_status)) throw new Error('此財產目前不可預約');
+  if (!String(payload.purpose || '').trim()) throw new Error('請填寫預約用途');
   const startAt = payload.start_at;
   const endAt = payload.end_at;
   if (!startAt || !endAt) throw new Error('請填寫預約起迄時間');
   if (new Date(endAt) <= new Date(startAt)) throw new Error('預約結束時間必須晚於開始時間');
+  if (new Date(startAt).getTime() < Date.now() - 60_000) throw new Error('不可預約過去時間');
+  const assetStatus = String(asset.asset_status || '').toLowerCase();
+  if (assetStatus && assetStatus !== 'normal' && assetStatus !== '正常') throw new Error('此財產不是正常狀態，無法預約');
   const conflict = (data.reservations || []).some((row) => (
     row.asset === asset.id
     && ['pending', 'approved'].includes(row.status)
@@ -298,7 +308,11 @@ export function demoCancelReservation(id) {
   const data = getDemoData();
   const rec = (data.reservations || []).find((row) => row.id === id);
   if (!rec) throw new Error('找不到預約');
-  if (!['pending', 'approved'].includes(rec.status)) throw new Error('此預約目前無法取消');
+  const profile = demoProfile();
+  const staff = profile?.role === 'staff' || profile?.role === 'admin';
+  if (!staff && rec.user !== profile?.id) throw new Error('只能取消自己的預借');
+  if (!staff && rec.status !== 'pending') throw new Error('只能取消自己仍在待審核的預借');
+  if (staff && !['pending', 'approved'].includes(rec.status)) throw new Error('此預約目前無法取消');
   rec.status = 'cancelled';
   rec.updated = new Date().toISOString();
   const asset = assetById(data, rec.asset);
@@ -384,17 +398,18 @@ export function demoCheckout(payload) {
   asset.availability_status = pending ? 'pending' : 'checked_out';
   asset.current_loan = rec.id;
   if (!pending) {
-    asset.usage_count = Number(asset.usage_count || 0) + 1;
     data.usage.unshift({
       id: uid('use'),
       asset: asset.id,
       loan: rec.id,
       user_name: rec.borrower_name,
+      user_number: rec.borrower_number,
       department: rec.borrower_department,
       used_at: now,
       purpose: rec.purpose,
       note: `借用編號 ${rec.loan_number}`
     });
+    syncDemoUsageCount(data, asset);
     log(data, '借出', { loan_number: rec.loan_number });
   } else {
     log(data, '送出借用申請', { loan_number: rec.loan_number });
@@ -427,7 +442,6 @@ export function demoCompleteCheckout(id) {
   if (asset) {
     asset.availability_status = 'checked_out';
     asset.current_loan = rec.id;
-    asset.usage_count = Number(asset.usage_count || 0) + 1;
   }
   data.usage.unshift({
     id: uid('use'),
@@ -439,6 +453,7 @@ export function demoCompleteCheckout(id) {
     purpose: rec.purpose,
     note: `借用編號 ${rec.loan_number}`
   });
+  syncDemoUsageCount(data, asset);
   log(data, '借出', { loan_number: rec.loan_number });
   saveData(data);
   return rec;
@@ -509,7 +524,7 @@ export function demoAddUsage(payload) {
     note: payload.note || ''
   };
   data.usage.unshift(rec);
-  asset.usage_count = Number(asset.usage_count || 0) + 1;
+  syncDemoUsageCount(data, asset);
   saveData(data);
   return rec;
 }

@@ -24,15 +24,32 @@ function inDemoMode() {
 }
 
 export function getBackendStatus() {
-  return { ...state, collections: [...state.collections] };
+  return { ...state, collections: [...state.collections], appMode: getAppMode() };
 }
 
-export function backendStatusLabel(status = state) {
-  if (status.mode === 'demo') return '測試資料模式';
-  if (status.mode === 'connected') return 'PocketBase 正式模式';
-  if (status.mode === 'failed') return 'PocketBase 連線失敗';
-  if (status.mode === 'checking') return '正在檢查後端連線…';
-  return 'PocketBase 尚未設定';
+export function backendStatusLabel() {
+  return appModeCopy();
+}
+
+/** @typedef {'checking' | 'official' | 'test' | 'offline'} AppMode */
+
+export function getAppMode() {
+  if (inDemoMode() || state.mode === 'demo') return 'test';
+  if (state.mode === 'connected') return 'official';
+  if (state.mode === 'failed') return 'offline';
+  return 'checking';
+}
+
+export function appModeCopy(mode = getAppMode()) {
+  if (mode === 'official') return 'PocketBase 正式模式';
+  if (mode === 'test') return '測試資料模式，不寫入 PocketBase';
+  if (mode === 'offline') return 'PocketBase 連線失敗';
+  return '正在檢查後端連線';
+}
+
+export function beginModeCheck() {
+  if (inDemoMode()) return markDemoBackend();
+  return setStatus('checking', '正在重新檢查 PocketBase…');
 }
 
 function setStatus(mode, message = '', collections = []) {
@@ -121,6 +138,12 @@ export function requirePocketBaseReady() {
   if (state.mode === 'connected') return;
   const detail = state.message || getPocketBaseConfigError() || '未知錯誤';
   throw new Error(`PocketBase 尚未進入正式模式。${detail}`);
+}
+
+export function assertOfficialWrite() {
+  if (inDemoMode()) throw new Error('測試模式不會寫入 PocketBase');
+  if (!pb.authStore.isValid) throw new Error('請先登入');
+  if (state.mode !== 'connected') throw new Error('目前不是 PocketBase 正式模式，已停止寫入');
 }
 
 export function isFormalPocketBaseMode() {

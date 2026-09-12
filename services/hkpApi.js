@@ -1,7 +1,9 @@
 import { pbMessage, requireClient } from './pocketbaseClient.js';
 import { hkpDirect } from './hkpDirect.js';
+import { assertOfficialWrite } from './backendStatus.js';
 
 export async function hkpPost(path, body = {}) {
+  assertOfficialWrite();
   const client = requireClient();
   try {
     return await client.send(path, {
