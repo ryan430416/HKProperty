@@ -96,6 +96,27 @@ https://hk-property.vercel.app
 http://localhost:5173
 ```
 
+## 正式登入帳號
+
+已在 `hkp_users` 建立三個測試帳，密碼寫在本機 `.env.local` 的 `HKP_FORMAL_PASSWORD`（勿提交）：
+
+| 角色 | 電子郵件 |
+| --- | --- |
+| 管理者 | `hkp-admin@hkproperty.local` |
+| 經辦 | `hkp-staff@hkproperty.local` |
+| 借用人 | `hkp-borrower@hkproperty.local` |
+
+到 https://hk-property.vercel.app/ 展開「使用 PocketBase 正式登入」後使用。這不是本機 `admin@hkproperty.local`。
+
+## 借用人借出
+
+共用庫沒有 `pb_hooks`。已把 `hkp_assets` 的 update 規則收成：
+
+- 經辦／管理者仍可改完整資料
+- 借用人只能在「可借用」時改成 `checked_out` 或 `reserved`，或歸還自己目前借出的財產
+- 不可改保管人、單價、位置、使用次數等內部欄位
+- 使用次數以 `hkp_usage_records` 筆數為準，不由借用人前端 `+1` 覆蓋
+
 ## 部署後驗證
 
 1. 開啟 https://hk-property.vercel.app/ ，狀態應為 PocketBase 正式模式，網址含 `db.keson.pro`。
@@ -107,6 +128,5 @@ http://localhost:5173
 
 ## 仍須手動確認
 
-- 正式登入帳號必須已存在於 `hkp_users`，並設好 `role`。
-- 這台共用庫沒有安裝本專案 `pb_hooks`。寫入走前端在登入權限內的 API。借用人自己完成「正式借出並改財產狀態」會被 `hkp_assets` 的 update 規則拒絕，需由經辦／管理者辦理借出，或日後在此 PocketBase 安裝 hooks。
+- 正式登入用 `hkp-admin@hkproperty.local`（密碼在 `.env.local`），不要用本機 PocketBase 的 superuser。
 - 不要對 `hkp_assets` 執行匯入覆寫。

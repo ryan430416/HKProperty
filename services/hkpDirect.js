@@ -137,21 +137,25 @@ async function createLoan(body) {
     note: trim(body.note)
   });
   await client.collection(PB.assets).update(asset.id, {
-    availability_status: pending ? 'pending' : 'checked_out',
-    current_loan: rec.id,
-    usage_count: pending ? asset.usage_count : Number(asset.usage_count || 0) + 1
+    availability_status: pending ? 'reserved' : 'checked_out',
+    current_loan: rec.id
   });
   if (!pending) {
     await client.collection(PB.usage).create({
       asset: asset.id,
       loan: rec.id,
       user_name: rec.borrower_name,
+      user_number: rec.borrower_number,
       department: rec.borrower_department,
       used_at: checkoutAt,
       purpose: rec.purpose,
       note: `借用編號 ${rec.loan_number}`,
       created_by: auth.id
     });
+    if (isStaff(auth)) {
+      const counted = await recountUsage(asset.id);
+      await client.collection(PB.assets).update(asset.id, { usage_count: counted });
+    }
     await logOp('借出', 'loan', rec.id, asset.id, { loan_number: rec.loan_number });
   } else {
     await logOp('借用申請', 'loan', rec.id, asset.id, { loan_number: rec.loan_number });
@@ -212,10 +216,12 @@ async function completeReturn(id, body) {
   const asset = await requireAsset(relationId(rec.asset));
   const patch = {
     availability_status: next,
-    current_loan: null,
-    return_alert: result === '有損壞' ? 'damaged' : result === '配件缺少' ? 'missing_parts' : ''
+    current_loan: null
   };
-  if (trim(body.return_location) && trim(body.return_location) !== trim(asset.location || '')) {
+  if (isStaff(auth)) {
+    patch.return_alert = result === '有損壞' ? 'damaged' : result === '配件缺少' ? 'missing_parts' : '';
+  }
+  if (isStaff(auth) && trim(body.return_location) && trim(body.return_location) !== trim(asset.location || '')) {
     await client.collection(PB.locations).create({
       asset: asset.id,
       from_location: asset.location || '',
