@@ -6,6 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "lint": "node --check js/app.js && node --check js/scanner.js && node --check services/pocketbaseClient.js && node --check services/hkpDirect.js && node --check services/inventoryService.js",
     "test:smoke": "vite-node tools/smoke_demo_render.mjs",
     "setup:pocketbase": "node scripts/setup-pocketbase.mjs",
     "import:assets": "node scripts/import-assets.mjs",

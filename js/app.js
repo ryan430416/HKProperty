@@ -394,7 +394,7 @@ function renderInventory() {
       <td>${esc(item.name)}</td>
       <td class="pid">${esc(item.propertyId)}</td>
       <td>${esc(displayValue(item.location))}</td>
-      <td>${esc(displayValue(item.department))}</td>
+      ${staff ? `<td>${esc(displayValue(item.department))}</td>` : ''}
       ${staff ? `<td>${esc(displayValue(item.custodian))}</td>` : ''}
       <td>${item.useCount}</td>
       <td><span class="badge">${esc(displayValue(item.status))}</span></td>
@@ -797,7 +797,7 @@ function openItem(propertyId) {
         ['財產名稱', item.name],
         ['財產編號', item.propertyId],
         ['目前位置', displayValue(item.location)],
-        ['保管單位', displayValue(item.department)],
+        staff ? ['保管單位', displayValue(item.department)] : null,
         staff ? ['保管人', displayValue(item.custodian)] : null,
         ['規格', displayValue(item.specification)],
         ['單位', displayValue(item.unit)],
@@ -808,11 +808,11 @@ function openItem(propertyId) {
         ['廠牌', displayValue(item.brand)],
         ['型號', displayValue(item.model)],
         ['財產狀態', item.availabilityStatus === AVAILABILITY.LOST ? '異常' : displayValue(item.status)],
-        ['借用狀態', item.availabilityLabel],
-        staff ? ['目前借用人', loan && isOpenLoan(loan) ? loan.borrowerName : '—'] : null,
-        ['借出時間', loan && isOpenLoan(loan) ? formatDateTime(loan.checkedOutAt) : '—'],
-        ['預計歸還時間', loan && isOpenLoan(loan) ? formatDateTime(loan.expectedReturnAt) : '—'],
-        ['借用用途', loan && isOpenLoan(loan) ? loan.purpose : '—'],
+        staff ? ['借用狀態', item.availabilityLabel] : ['借用狀態', item.availabilityLabel],
+        staff && loan && isOpenLoan(loan) ? ['目前借用人', loan.borrowerName] : null,
+        staff && loan && isOpenLoan(loan) ? ['借出時間', formatDateTime(loan.checkedOutAt)] : null,
+        staff && loan && isOpenLoan(loan) ? ['預計歸還時間', formatDateTime(loan.expectedReturnAt)] : null,
+        staff && loan && isOpenLoan(loan) ? ['借用用途', loan.purpose] : null,
         ['使用次數', String(item.useCount)],
         staff ? ['最後盤點時間', item.lastAuditAt ? formatDateTime(item.lastAuditAt) : '尚未盤點'] : null,
         staff ? ['盤點狀態', item.auditStatus] : null,
@@ -828,8 +828,8 @@ function openItem(propertyId) {
     <div class="action-grid">
       ${staff ? loanActionButtons(item) : `<button type="button" class="primary" data-self="borrow">前往自助借用</button>`}
       ${canReserve ? `<button type="button" class="secondary" data-reserve="${esc(item.propertyId)}">預約借用</button>` : ''}
-      ${staff ? `<button type="button" class="secondary" data-usage="${esc(item.propertyId)}">現場使用登記</button>
-      <button type="button" class="primary" data-audit="${esc(item.propertyId)}">執行盤點</button>
+      <button type="button" class="secondary" data-usage="${esc(item.propertyId)}">登記使用一次</button>
+      ${staff ? `<button type="button" class="primary" data-audit="${esc(item.propertyId)}">執行盤點</button>
       <button type="button" class="secondary" data-location="${esc(item.propertyId)}">更新位置</button>
       <button type="button" class="secondary" data-image="${esc(item.propertyId)}">上傳圖片</button>
       <button type="button" class="secondary" data-history="${esc(item.propertyId)}">查看紀錄</button>` : ''}
@@ -902,14 +902,22 @@ function renderReservationManage() {
 
 function openUsage(propertyId) {
   const item = getItem(propertyId);
+  const profile = getProfile();
   if (!item) return;
   $('usagePropertyId').value = item.propertyId;
   $('usageEyebrow').textContent = `${item.name} · ${item.propertyId}`;
-  $('usageUser').value = '';
-  $('usageDept').value = item.department || '';
+  if ($('usageDialogTitle')) $('usageDialogTitle').textContent = `登記使用一次｜${item.name}`;
+  if ($('usageSummary')) {
+    $('usageSummary').textContent = `${item.name}（${item.propertyId}）目前在「${item.location || '未設定'}」。登記成功後只增加一次使用次數，不改變位置，也不改成已借出。`;
+  }
+  $('usageUser').value = profile?.display_name || '';
+  if ($('usageNumber')) $('usageNumber').value = profile?.school_number || '';
+  $('usageDept').value = isStaff() ? (item.department || profile?.department || '') : (profile?.department || '');
   $('usageAt').value = toInputDateTime();
   $('usagePurpose').value = '';
   $('usageNote').value = '';
+  const btn = $('usageSubmitBtn');
+  if (btn) btn.disabled = false;
   state.returnToDetailId = item.propertyId;
   openExclusiveDialog('usageDialog');
 }
@@ -1546,10 +1554,14 @@ function bindEvents() {
 
   $('usageForm').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const btn = $('usageSubmitBtn');
+    if (btn?.disabled) return;
+    if (btn) btn.disabled = true;
     try {
       const { item } = await addUsage({
         propertyId: $('usagePropertyId').value,
         userName: $('usageUser').value,
+        userNumber: $('usageNumber')?.value || '',
         department: $('usageDept').value,
         usedAt: $('usageAt').value,
         purpose: $('usagePurpose').value,
@@ -1559,6 +1571,8 @@ function bindEvents() {
       await afterMutation(item.propertyId, '已完成現場使用登記，使用次數已更新');
     } catch (error) {
       toast(error.message || '現場使用登記失敗', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
     }
   });
 

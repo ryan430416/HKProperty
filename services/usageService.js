@@ -38,28 +38,27 @@ export function listUsage(propertyId) {
   return logs.filter((log) => log.propertyId === propertyId || log.assetId === propertyId);
 }
 
-export async function addUsage({ propertyId, userName, department, usedAt, purpose, note }) {
+export async function addUsage({ propertyId, userName, userNumber, department, usedAt, purpose, note }) {
   const item = getItem(propertyId);
   if (!item) throw new Error('找不到財產');
-  const data = isDemoMode()
-    ? demoAddUsage({
-      asset_id: item.id,
-      user_name: userName,
-      department,
-      used_at: new Date(usedAt).toISOString(),
-      purpose,
-      note: note || null
-    })
-    : await hkpPost('/api/hkproperty/usage', {
+  if (!String(userName || '').trim()) throw new Error('請填寫使用人姓名');
+  if (String(userNumber || '').trim().length < 4) throw new Error('學號或教職員編號至少 4 個字元');
+  if (!String(purpose || '').trim()) throw new Error('請填寫使用用途');
+  if (!usedAt) throw new Error('請填寫使用時間');
+  const payload = {
     asset_id: item.id,
     user_name: userName,
+    user_number: userNumber,
     department,
     used_at: new Date(usedAt).toISOString(),
     purpose,
     note: note || null,
     usage_type: 'on_site',
-    idempotency_key: `usage-${item.id}-${usedAt}-${userName}`
-  });
+    idempotency_key: `usage-${item.id}-${usedAt}-${userNumber}`
+  };
+  const data = isDemoMode()
+    ? demoAddUsage(payload)
+    : await hkpPost('/api/hkproperty/usage', payload);
   await loadCatalog();
   await loadUsage();
   return { entry: mapUsage(data, item), item: getItem(propertyId) };

@@ -441,7 +441,7 @@
                 <option value="maintenance">維修中</option>
               </select>
             </div>
-            <div class="field">
+            <div class="field" data-staff-col>
               <label for="filterDept">保管單位</label>
               <select id="filterDept"></select>
             </div>
@@ -466,7 +466,7 @@
                   <th scope="col">財產名稱</th>
                   <th scope="col">財產編號</th>
                   <th scope="col">目前位置</th>
-                  <th scope="col">保管單位</th>
+                  <th scope="col" data-staff-col>保管單位</th>
                   <th scope="col" data-staff-col>保管人</th>
                   <th scope="col">使用次數</th>
                   <th scope="col">財產狀態</th>
@@ -706,27 +706,31 @@
       <div class="dialog-head">
         <div>
           <p class="eyebrow" id="usageEyebrow">現場使用登記</p>
-          <h2>現場使用登記</h2>
+          <h2 id="usageDialogTitle">登記使用一次</h2>
         </div>
         <button type="button" class="icon-btn" data-close="usageDialog" aria-label="關閉">×</button>
       </div>
       <div class="dialog-scroll">
-      <p class="muted">物品未借離原存放地點，只記錄一次使用。若物品要被帶走，請改用「辦理借出」。</p>
+      <p class="muted" id="usageSummary">物品未借離原存放地點，只記錄一次使用，不改位置、也不改成已借出。</p>
       <input type="hidden" id="usagePropertyId" />
       <div class="field">
-        <label for="usageUser">使用人</label>
+        <label for="usageUser">使用人姓名 <span class="req">必填</span></label>
         <input id="usageUser" required maxlength="40" autocomplete="name" />
       </div>
       <div class="field">
-        <label for="usageDept">使用單位</label>
-        <input id="usageDept" required maxlength="60" />
+        <label for="usageNumber">學號或教職員編號 <span class="req">必填</span></label>
+        <input id="usageNumber" required minlength="4" maxlength="40" />
       </div>
       <div class="field">
-        <label for="usageAt">使用日期與時間</label>
+        <label for="usageDept">使用單位</label>
+        <input id="usageDept" maxlength="60" />
+      </div>
+      <div class="field">
+        <label for="usageAt">使用時間 <span class="req">必填</span></label>
         <input id="usageAt" type="datetime-local" required />
       </div>
       <div class="field">
-        <label for="usagePurpose">使用用途</label>
+        <label for="usagePurpose">使用用途 <span class="req">必填</span></label>
         <input id="usagePurpose" required maxlength="80" />
       </div>
       <div class="field">
@@ -736,7 +740,7 @@
       </div>
       <div class="dialog-actions sticky">
         <button type="button" class="secondary" data-close="usageDialog">取消</button>
-        <button type="submit" class="primary">儲存紀錄</button>
+        <button type="submit" class="primary" id="usageSubmitBtn">確認登記</button>
       </div>
     </form>
   </dialog>

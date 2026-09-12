@@ -3,7 +3,7 @@ import { AUDIT_STATUS, PLACEHOLDER_IMAGE } from '../js/format.js';
 import { isDemoMode, isStaff } from './authService.js';
 import { demoAssets, demoSavePhoto, demoSetActive } from './demoStore.js';
 import { hkpPost } from './hkpApi.js';
-import { pbMessage, requireClient } from './pocketbaseClient.js';
+import { logPocketBaseError, pbMessage, requireClient } from './pocketbaseClient.js';
 import { publicImageUrl, uploadAssetImage } from './storageService.js';
 
 export const AVAILABILITY = {
@@ -26,7 +26,8 @@ export const AVAILABILITY_LABEL = {
   lost: '異常'
 };
 
-const BASIC_FIELDS = 'id,property_id,name,location,department,specification,unit,availability_status,usage_count,borrowable,active,current_loan,audit_status,last_audit_at,created,updated,image';
+const PUBLIC_FIELDS = 'id,property_id,name,location,specification,unit,availability_status,usage_count,is_borrowable,is_active,asset_status,brand,model,photo,audit_status';
+const STAFF_FIELDS = `${PUBLIC_FIELDS},department,custodian,price,purchase_date,service_life,supplier,note,current_loan,last_audit_at,return_alert`;
 
 let cache = [];
 let loaded = false;
@@ -106,17 +107,41 @@ export async function loadCatalog() {
   const staff = isStaff();
   try {
     const options = { sort: 'property_id' };
-    if (!staff) {
-      options.filter = 'active = true';
-      options.fields = BASIC_FIELDS;
+    const collection = staff ? PB.assets : PB.assetsPublic;
+    options.fields = staff ? STAFF_FIELDS : PUBLIC_FIELDS;
+    let data;
+    try {
+      data = await client.collection(collection).getFullList(options);
+    } catch (error) {
+      if (!staff) {
+        logPocketBaseError('loadCatalog.public', error, { collection, fallback: PB.assets });
+        data = await client.collection(PB.assets).getFullList({ sort: 'property_id', fields: PUBLIC_FIELDS });
+      } else {
+        throw error;
+      }
     }
-    const data = await client.collection(PB.assets).getFullList(options);
     const rows = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
     cache = rows.map(mapAsset);
+    await overlayUsageCounts(client);
     loaded = true;
     return listItems();
   } catch (error) {
+    logPocketBaseError('loadCatalog', error, { collection: staff ? PB.assets : PB.assetsPublic });
     throw new Error(pbMessage(error, '無法載入財產清冊'));
+  }
+}
+
+async function overlayUsageCounts(client) {
+  try {
+    const rows = await client.collection(PB.usageCounts).getFullList({ fields: 'id,usage_count' });
+    const counts = new Map((rows || []).map((row) => [row.id, Number(row.usage_count || 0)]));
+    cache = cache.map((item) => {
+      if (!counts.has(item.id)) return item;
+      const useCount = counts.get(item.id);
+      return { ...item, useCount };
+    });
+  } catch (error) {
+    logPocketBaseError('usageCounts', error, { collection: PB.usageCounts });
   }
 }
 

@@ -1,5 +1,5 @@
 import { demoProfile } from './demoStore.js';
-import { getPocketBaseConfigError, pb, pbMessage } from './pocketbaseClient.js';
+import { getPocketBaseConfigError, logPocketBaseError, pb, pbMessage } from './pocketbaseClient.js';
 import { PB } from '../pocketbase/schema.mjs';
 
 /** @typedef {'unset' | 'checking' | 'connected' | 'demo' | 'failed'} BackendMode */
@@ -55,7 +55,10 @@ async function assertCollectionReadable(collection, { requireRead = false } = {}
     return null;
   } catch (error) {
     const status = error?.status || error?.data?.code;
-    if (status === 404) return `集合 ${collection} 不存在`;
+    if (status === 404) {
+      logPocketBaseError('health.collection', error, { collection, url: `${pb.baseUrl}/api/collections/${collection}/records` });
+      return `集合 ${collection} 不存在`;
+    }
     // 登入前：401/403 代表集合存在但需登入，不算失敗
     if (!requireRead && (status === 401 || status === 403)) return null;
     if (status === 403 || status === 401) return `集合 ${collection} 無權限讀取`;
@@ -88,7 +91,8 @@ export async function probePocketBase({ requireRead = false } = {}) {
     const reason = error?.name === 'AbortError'
       ? '連線逾時'
       : pbMessage(error, error?.message || '無法連線');
-    return setStatus('failed', `PocketBase 尚未連線：${reason}`);
+      logPocketBaseError('health', error, { requestUrl: `${pb.baseUrl}/api/health` });
+      return setStatus('failed', `PocketBase 尚未連線：${reason}`);
   }
 
   const ok = [];

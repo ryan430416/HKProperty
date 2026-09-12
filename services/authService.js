@@ -140,10 +140,12 @@ export async function registerWithPassword(email, password) {
       password,
       passwordConfirm: password,
       emailVisibility: true,
+      display_name: trimmed.split('@')[0],
       name: trimmed.split('@')[0],
       school_number: `TMP-${Date.now().toString(36)}`,
       role: 'borrower',
-      active: true
+      active: true,
+      is_active: true
     });
     await client.collection(PB.users).authWithPassword(trimmed, password);
   } catch (error) {

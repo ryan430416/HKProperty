@@ -4,16 +4,23 @@
  * collection with unrelated apps.
  */
 
+/**
+ * Shared instance https://db.keson.pro already stores the 390 assets in `hkp_*`.
+ * Do not switch to unprefixed names or the catalog will miss those records.
+ * Do not mutate the shared `users` collection.
+ */
 export const PB = {
-  users: 'users',
-  assets: 'assets',
-  loans: 'loan_records',
-  reservations: 'asset_reservations',
-  usage: 'usage_records',
-  audits: 'inventory_audits',
-  locations: 'location_history',
-  logs: 'operation_logs',
-  settings: 'system_settings'
+  users: 'hkp_users',
+  assets: 'hkp_assets',
+  assetsPublic: 'hkp_assets_public',
+  usageCounts: 'hkp_usage_counts',
+  loans: 'hkp_loan_records',
+  reservations: 'hkp_asset_reservations',
+  usage: 'hkp_usage_records',
+  audits: 'hkp_inventory_audits',
+  locations: 'hkp_location_history',
+  logs: 'hkp_operation_logs',
+  settings: 'hkp_system_settings'
 };
 
 export const ROLES = ['borrower', 'staff', 'admin'];

@@ -59,11 +59,27 @@ async function settingsRecord() {
   return rows[0];
 }
 
+async function recountUsage(assetId) {
+  const client = requireClient();
+  const rows = await client.collection(PB.usage).getFullList({
+    filter: `asset = "${assetId}"`,
+    fields: 'id'
+  });
+  return Math.max(0, rows.length);
+}
+
 async function requireAsset(id) {
   const client = requireClient();
-  const asset = await client.collection(PB.assets).getOne(id);
-  if (!asset || asset.is_active === false) throw new Error('查無此財產編號');
-  return asset;
+  try {
+    const asset = await client.collection(PB.assets).getOne(id);
+    if (!asset || asset.is_active === false) throw new Error('查無此財產編號');
+    return asset;
+  } catch (error) {
+    if (error?.status !== 403 && error?.status !== 404) throw error;
+    const asset = await client.collection(PB.assetsPublic).getOne(id);
+    if (!asset || asset.is_active === false) throw new Error('查無此財產編號');
+    return asset;
+  }
 }
 
 function nextLoanNumber(existing) {
@@ -215,6 +231,86 @@ async function completeReturn(id, body) {
   return updated;
 }
 
+function overlaps(startAt, endAt, otherStart, otherEnd) {
+  return new Date(startAt).getTime() < new Date(otherEnd).getTime()
+    && new Date(endAt).getTime() > new Date(otherStart).getTime();
+}
+
+async function createReservation(body) {
+  const client = requireClient();
+  const auth = authRecord();
+  const asset = await requireAsset(body.asset_id);
+  if (!trim(body.purpose)) throw new Error('請填寫預約用途');
+  if (!body.start_at || !body.end_at) throw new Error('請填寫預約起迄時間');
+  if (new Date(body.end_at) <= new Date(body.start_at)) throw new Error('預約結束時間必須晚於開始時間');
+  if (asset.is_borrowable === false) throw new Error('此財產不可借用');
+  if (['maintenance', 'lost', 'checked_out', 'overdue'].includes(asset.availability_status)) {
+    throw new Error('此財產目前不可預約');
+  }
+  const existing = await client.collection(PB.reservations).getFullList({
+    filter: `asset = "${asset.id}" && (status = "pending" || status = "approved")`
+  });
+  if (existing.some((row) => overlaps(body.start_at, body.end_at, row.start_at, row.end_at))) {
+    throw new Error('此時段已有其他待審或已核准的預約');
+  }
+  const day = nowIso().slice(0, 10).replace(/-/g, '');
+  const rec = await client.collection(PB.reservations).create({
+    reservation_number: `RSV-${day}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+    asset: asset.id,
+    user: auth.id,
+    user_name: displayName(auth),
+    property_id: asset.property_id,
+    property_name: asset.name,
+    purpose: trim(body.purpose),
+    start_at: body.start_at,
+    end_at: body.end_at,
+    status: 'pending',
+    contact: trim(body.contact),
+    note: trim(body.note)
+  });
+  await logOp('預約申請', 'reservation', rec.id, asset.id, { reservation_number: rec.reservation_number });
+  return rec;
+}
+
+async function approveReservation(id) {
+  const client = requireClient();
+  const auth = authRecord();
+  if (!isStaff(auth)) throw new Error('沒有核准預約的權限');
+  const rec = await client.collection(PB.reservations).getOne(id);
+  if (rec.status !== 'pending') throw new Error('僅能核准待審核的預約');
+  const others = await client.collection(PB.reservations).getFullList({
+    filter: `asset = "${relationId(rec.asset)}" && status = "approved" && id != "${rec.id}"`
+  });
+  if (others.some((row) => overlaps(rec.start_at, rec.end_at, row.start_at, row.end_at))) {
+    throw new Error('此時段已有衝突的預約');
+  }
+  const updated = await client.collection(PB.reservations).update(id, {
+    status: 'approved',
+    approved_by: auth.id,
+    approved_at: nowIso()
+  });
+  return updated;
+}
+
+async function rejectReservation(id, reason) {
+  const client = requireClient();
+  if (!isStaff()) throw new Error('沒有拒絕預約的權限');
+  if (!trim(reason)) throw new Error('請填寫拒絕原因');
+  return client.collection(PB.reservations).update(id, {
+    status: 'rejected',
+    rejection_reason: trim(reason)
+  });
+}
+
+async function cancelReservation(id) {
+  const client = requireClient();
+  const auth = authRecord();
+  const rec = await client.collection(PB.reservations).getOne(id);
+  if (!isStaff(auth) && relationId(rec.user) !== auth.id) throw new Error('只能取消自己的預借');
+  if (!['pending', 'approved'].includes(rec.status)) throw new Error('此預約目前無法取消');
+  return client.collection(PB.reservations).update(id, { status: 'cancelled' });
+}
+
 export async function hkpDirect(path, body = {}) {
   const client = requireClient();
   const auth = authRecord();
@@ -225,6 +321,9 @@ export async function hkpDirect(path, body = {}) {
     return completeReturn(body.loan_id, body);
   }
   if (path === '/api/hkproperty/usage') path = '/api/hkp/usage';
+  if (path === '/api/hkproperty/reservations') path = '/api/hkp/reservations';
+  const propRsv = path.match(/^\/api\/hkproperty\/reservations\/([^/]+)\/(approve|reject|cancel)$/);
+  if (propRsv) path = `/api/hkp/reservations/${propRsv[1]}/${propRsv[2]}`;
   if (path === '/api/hkproperty/audits') path = '/api/hkp/audits';
   if (path === '/api/hkproperty/settings') path = '/api/hkp/settings';
   const propAsset = path.match(/^\/api\/hkproperty\/assets\/([^/]+)\/(location|active)$/);
@@ -260,19 +359,43 @@ export async function hkpDirect(path, body = {}) {
     if (action === 'return' || action === 'return-request') return completeReturn(id, body);
   }
   if (path === '/api/hkp/usage') {
-    if (!isStaff(auth)) throw new Error('沒有登記使用的權限');
     const asset = await requireAsset(body.asset_id);
-    const rec = await client.collection(PB.usage).create({
+    if (!trim(body.user_name)) throw new Error('請填寫使用人姓名');
+    if (trim(body.user_number).length < 4) throw new Error('學號或教職員編號至少 4 個字元');
+    if (!trim(body.purpose)) throw new Error('請填寫使用用途');
+    if (!body.used_at) throw new Error('請填寫使用時間');
+    const payload = {
       asset: asset.id,
       user_name: trim(body.user_name),
       department: trim(body.department),
       used_at: body.used_at,
       purpose: trim(body.purpose),
       note: trim(body.note),
-      created_by: auth.id
-    });
-    await client.collection(PB.assets).update(asset.id, { usage_count: Number(asset.usage_count || 0) + 1 });
-    return rec;
+      created_by: auth.id,
+      user_number: trim(body.user_number)
+    };
+    let rec;
+    try {
+      rec = await client.collection(PB.usage).create(payload);
+    } catch (error) {
+      delete payload.user_number;
+      rec = await client.collection(PB.usage).create(payload);
+      if (error) {
+        console.error('[HKProperty PocketBase]', { scope: 'usage.user_number', message: error.message });
+      }
+    }
+    const counted = await recountUsage(asset.id);
+    try {
+      await client.collection(PB.assets).update(asset.id, { usage_count: counted });
+    } catch (error) {
+      console.error('[HKProperty PocketBase]', {
+        scope: 'usage_count',
+        url: `${requireClient().baseUrl}/api/collections/${PB.assets}/records/${asset.id}`,
+        collection: PB.assets,
+        message: error?.message
+      });
+    }
+    return { ...rec, usage_count: counted };
   }
   if (path === '/api/hkp/audits') {
     if (!isStaff(auth)) throw new Error('沒有盤點權限');
@@ -318,6 +441,14 @@ export async function hkpDirect(path, body = {}) {
     const updated = await client.collection(PB.assets).update(activeMut[1], { is_active: body.is_active !== false });
     await logOp(body.is_active !== false ? '修改財產' : '停用財產', 'asset', updated.id, updated.id, { property_id: updated.property_id, is_active: updated.is_active });
     return updated;
+  }
+  if (path === '/api/hkp/reservations') return createReservation(body);
+  const rsvMut = path.match(/^\/api\/hkp\/reservations\/([^/]+)\/(approve|reject|cancel)$/);
+  if (rsvMut) {
+    const [, id, action] = rsvMut;
+    if (action === 'approve') return approveReservation(id);
+    if (action === 'reject') return rejectReservation(id, body.reason);
+    return cancelReservation(id);
   }
   if (path === '/api/hkp/settings') {
     if (!isAdmin(auth)) throw new Error('只有管理者可以修改系統設定');
