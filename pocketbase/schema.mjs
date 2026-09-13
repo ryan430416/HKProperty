@@ -11,17 +11,25 @@
  */
 export const PB = {
   users: 'hkp_users',
+  staffUsers: 'hkp_staff_users',
   assets: 'hkp_assets',
   assetsPublic: 'hkp_assets_public',
+  assetsGuest: 'hkp_assets_guest',
   usageCounts: 'hkp_usage_counts',
   loans: 'hkp_loan_records',
   reservations: 'hkp_asset_reservations',
+  reservationsV2: 'hkp_reservations_v2',
+  reservationSlots: 'hkp_reservation_slots',
+  reservationPublic: 'hkp_reservation_public',
+  borrowRequests: 'hkp_borrow_requests',
+  borrowRecords: 'hkp_borrow_records',
+  borrowSlots: 'hkp_borrow_slots',
+  returnRequests: 'hkp_return_requests',
   usage: 'hkp_usage_records',
   audits: 'hkp_inventory_audits',
   locations: 'hkp_location_history',
   logs: 'hkp_operation_logs',
-  settings: 'hkp_system_settings',
-  reservationSlots: 'hkp_reservation_slots'
+  settings: 'hkp_system_settings'
 };
 
 export const ROLES = ['borrower', 'staff', 'admin'];

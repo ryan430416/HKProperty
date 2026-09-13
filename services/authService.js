@@ -1,7 +1,6 @@
 import { PB } from '../pocketbase/schema.mjs';
 import { demoProfile, demoUpdateMe, demoUpdateUser, demoUsers, enterDemo, exitDemo } from './demoStore.js';
 import { getPocketBaseConfigError, pb, pbMessage, requireClient } from './pocketbaseClient.js';
-import { hkpPost } from './hkpApi.js';
 
 let currentUser = null;
 let currentProfile = null;
@@ -13,6 +12,10 @@ export const ROLES = {
   STAFF: 'staff',
   ADMIN: 'admin'
 };
+
+export function testModeEnabled() {
+  return import.meta.env.VITE_ENABLE_TEST_MODE === 'true';
+}
 
 export function roleLabel(role) {
   if (role === ROLES.ADMIN) return '管理者';
@@ -43,9 +46,12 @@ function mapProfile(record) {
     id: record.id,
     display_name: record.name || record.display_name || String(record.email || '').split('@')[0] || '使用者',
     name: record.name || record.display_name || '',
-    school_number: record.school_number || '',
+    school_number: record.employee_number || record.school_number || '',
+    employee_number: record.employee_number || '',
+    phone: record.phone || '',
     department: record.department || '',
-    role: record.role || ROLES.BORROWER,
+    last_login_at: record.last_login_at || '',
+    role: record.role || '',
     is_active: active,
     active,
     email: record.email || '',
@@ -81,9 +87,11 @@ export async function initAuth(onChange) {
   }
   const client = requireClient();
   if (unsub) unsub();
+  const stored = client.authStore.record;
+  if (stored?.collectionName && stored.collectionName !== PB.staffUsers) client.authStore.clear();
   if (client.authStore.isValid) {
     try {
-      await client.collection(PB.users).authRefresh();
+      await client.collection(PB.staffUsers).authRefresh();
     } catch {
       client.authStore.clear();
     }
@@ -110,6 +118,7 @@ export function isDemoMode() {
 }
 
 export async function enterDemoSession(role = 'admin') {
+  if (!testModeEnabled()) throw new Error('正式環境未開放測試登入');
   currentProfile = enterDemo(role);
   currentUser = currentProfile;
   authReady = true;
@@ -122,36 +131,25 @@ export async function signInWithPassword(email, password) {
   if (!trimmed) throw new Error('請輸入電子郵件');
   if (!password) throw new Error('請輸入密碼');
   try {
-    await client.collection(PB.users).authWithPassword(trimmed, password);
+    await client.collection(PB.staffUsers).authWithPassword(trimmed, password);
   } catch (error) {
     throw new Error(pbMessage(error, '登入失敗，請確認電子郵件與密碼'));
   }
-  return loadProfile();
+  const profile = await loadProfile();
+  if (!profile || (profile.role !== ROLES.ADMIN && profile.role !== ROLES.STAFF) || !profile.active) {
+    await signOut();
+    throw new Error('此帳號無法進入後台');
+  }
+  try {
+    await client.collection(PB.staffUsers).update(profile.id, { last_login_at: new Date().toISOString() });
+  } catch {
+    // last_login 由規則限制時不影響登入，也不寫入密碼
+  }
+  return profile;
 }
 
-export async function registerWithPassword(email, password) {
-  const client = requireClient();
-  const trimmed = String(email || '').trim();
-  if (!trimmed) throw new Error('請輸入電子郵件');
-  if (String(password || '').length < 8) throw new Error('密碼至少 8 個字元');
-  try {
-    await client.collection(PB.users).create({
-      email: trimmed,
-      password,
-      passwordConfirm: password,
-      emailVisibility: true,
-      display_name: trimmed.split('@')[0],
-      name: trimmed.split('@')[0],
-      school_number: `TMP-${Date.now().toString(36)}`,
-      role: 'borrower',
-      active: true,
-      is_active: true
-    });
-    await client.collection(PB.users).authWithPassword(trimmed, password);
-  } catch (error) {
-    throw new Error(pbMessage(error, '註冊失敗'));
-  }
-  return loadProfile();
+export async function registerWithPassword() {
+  throw new Error('借用人不需要註冊。請直接使用首頁的預借、借用或歸還。');
 }
 
 export async function sendLoginOtp(email) {
@@ -213,10 +211,50 @@ export async function listProfiles() {
   if (!isAdmin()) throw new Error('只有管理者可以管理使用者');
   const client = requireClient();
   try {
-    const data = await client.collection(PB.users).getFullList({ sort: '-created' });
+    const data = await client.collection(PB.staffUsers).getFullList({ sort: '-created' });
     return Array.isArray(data) ? data.map(mapProfile) : [];
   } catch (error) {
     throw new Error(pbMessage(error, '無法載入使用者'));
+  }
+}
+
+export async function createStaffAccount({ email, password, name, employeeNumber, department, phone }) {
+  if (!isAdmin()) throw new Error('只有管理者可以建立經辦人員');
+  const client = requireClient();
+  const trimmed = String(email || '').trim();
+  if (!trimmed) throw new Error('請填寫電子郵件');
+  if (String(password || '').length < 8) throw new Error('密碼至少 8 個字元');
+  if (String(name || '').trim().length < 2) throw new Error('請填寫姓名');
+  if (!String(employeeNumber || '').trim()) throw new Error('請填寫員工編號');
+  try {
+    const row = await client.collection(PB.staffUsers).create({
+      email: trimmed,
+      password,
+      passwordConfirm: password,
+      emailVisibility: false,
+      name: String(name).trim(),
+      employee_number: String(employeeNumber).trim(),
+      role: 'staff',
+      department: String(department || '').trim(),
+      phone: String(phone || '').trim(),
+      active: true,
+      is_active: true
+    });
+    return mapProfile(row);
+  } catch (error) {
+    throw new Error(pbMessage(error, '無法建立經辦人員'));
+  }
+}
+
+export async function requestStaffPasswordReset(email) {
+  if (!isAdmin()) throw new Error('只有管理者可以重設密碼');
+  const client = requireClient();
+  const trimmed = String(email || '').trim();
+  if (!trimmed) throw new Error('請填寫電子郵件');
+  try {
+    await client.collection(PB.staffUsers).requestPasswordReset(trimmed);
+  } catch (error) {
+    throw new Error(pbMessage(error, '無法寄出重設密碼信。請確認 PocketBase 已設定 SMTP。'));
   }
 }
 
@@ -231,15 +269,26 @@ export async function adminUpdateProfile(payload) {
       school_number: payload.schoolNumber ?? null
     });
   }
-  return hkpPost(`/api/hkproperty/users/${payload.id}`, {
-    role: payload.role ?? null,
-    active: payload.isActive ?? null,
-    is_active: payload.isActive ?? null,
-    name: payload.displayName ?? null,
-    display_name: payload.displayName ?? null,
-    department: payload.department ?? null,
-    school_number: payload.schoolNumber ?? null
-  });
+  if (!isAdmin()) throw new Error('只有管理者可以管理使用者');
+  if (payload.id === currentProfile?.id && payload.isActive === false) throw new Error('不能停用目前登入中的自己');
+  const admins = (await listProfiles()).filter((row) => row.role === ROLES.ADMIN && row.is_active);
+  const target = admins.find((row) => row.id === payload.id);
+  if (target && payload.isActive === false && admins.length <= 1) throw new Error('至少要保留一個有效管理員');
+  const client = requireClient();
+  const patch = {};
+  if (payload.displayName != null) patch.name = String(payload.displayName).trim();
+  if (payload.department != null) patch.department = String(payload.department).trim();
+  if (payload.phone != null) patch.phone = String(payload.phone).trim();
+  if (payload.isActive != null) {
+    patch.active = payload.isActive;
+    patch.is_active = payload.isActive;
+  }
+  try {
+    const data = await client.collection(PB.staffUsers).update(payload.id, patch);
+    return mapProfile(data);
+  } catch (error) {
+    throw new Error(pbMessage(error, '無法更新經辦人員'));
+  }
 }
 
 export async function signOut() {

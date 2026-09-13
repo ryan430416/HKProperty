@@ -1,0 +1,416 @@
+import { PB } from '../pocketbase/schema.mjs';
+import { getProfile, isStaff } from './authService.js';
+import { pbMessage, requireClient } from './pocketbaseClient.js';
+import { publicImageUrl } from './storageService.js';
+import {
+  VERIFY_FAIL,
+  collapse,
+  createPublicToken,
+  createRequestNumber,
+  hashToken,
+  maskPhone,
+  normalizePhone,
+  phonesMatch,
+  validateName,
+  validatePhone,
+  validateUnit
+} from './privacy.js';
+
+const HOOK_MISSING = '借用服務尚未完成伺服器驗證設定，請改洽經辦人員辦理。';
+
+function guestImage(row) {
+  const filename = Array.isArray(row.photo) ? row.photo[0] : row.photo;
+  if (!filename) return '';
+  try {
+    return publicImageUrl({ ...row, collectionId: row.collectionId, collectionName: PB.assetsGuest }, filename);
+  } catch {
+    return '';
+  }
+}
+
+export function mapGuestAsset(row) {
+  const status = row.availability_status || 'available';
+  const borrowable = row.is_borrowable !== false;
+  const available = borrowable && status === 'available';
+  return {
+    id: row.id,
+    propertyId: String(row.property_id || ''),
+    name: row.name || '',
+    location: row.location || '',
+    availabilityStatus: status,
+    available,
+    image: guestImage(row)
+  };
+}
+
+export async function listGuestAssets(query = '') {
+  const client = requireClient();
+  const q = collapse(query);
+  const filter = q
+    ? `(property_id ~ {:q} || name ~ {:q}) && is_active != false`
+    : 'is_active != false';
+  const rows = await client.collection(PB.assetsGuest).getList(1, 24, {
+    filter,
+    ...(q ? { q } : {})
+  });
+  return (rows.items || []).map(mapGuestAsset);
+}
+
+async function postPublic(path, body) {
+  const client = requireClient();
+  const response = await fetch(`${client.baseUrl}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  let data = null;
+  try { data = await response.json(); } catch { data = null; }
+  return { status: response.status, data };
+}
+
+function identityError() {
+  const error = new Error(VERIFY_FAIL);
+  error.code = 'verify_failed';
+  return error;
+}
+
+function assertPerson({ unit, name, phone, requireUnit = true }) {
+  if (requireUnit) {
+    const unitError = validateUnit(unit);
+    if (unitError) throw new Error(unitError);
+  }
+  const nameError = validateName(name);
+  if (nameError) throw new Error(nameError);
+  const phoneError = validatePhone(phone);
+  if (phoneError) throw new Error(phoneError);
+}
+
+async function activeLoanExists(assetId) {
+  const client = requireClient();
+  const rows = await client.collection(PB.borrowSlots).getList(1, 1, {
+    filter: `asset = "${assetId}" && (status = "borrowed" || status = "return_pending")`
+  });
+  return rows.totalItems > 0;
+}
+
+async function reservationConflict(assetId, startAt, endAt) {
+  const client = requireClient();
+  const rows = await client.collection(PB.reservationPublic).getFullList({
+    filter: `asset = "${assetId}" && (status = "pending" || status = "approved")`,
+    fields: 'id,start_at,end_at,status'
+  });
+  const start = new Date(startAt).getTime();
+  const end = new Date(endAt).getTime();
+  return (rows || []).some((row) => start < new Date(row.end_at).getTime() && end > new Date(row.start_at).getTime());
+}
+
+export async function submitBorrow(input) {
+  assertPerson(input);
+  if (!input.assetId) throw new Error('請先選擇財產');
+  if (!collapse(input.purpose)) throw new Error('請填寫用途');
+  if (!input.expectedReturnAt) throw new Error('請填寫預計歸還時間');
+  if (new Date(input.expectedReturnAt).getTime() <= Date.now()) throw new Error('預計歸還時間必須晚於現在');
+  if (!input.privacyAck) throw new Error('請先勾選個資使用告知');
+  if (await activeLoanExists(input.assetId)) throw new Error('此財產目前已借出或待歸還，無法再送出借用');
+
+  const token = createPublicToken();
+  const payload = {
+    assetId: input.assetId,
+    unit: collapse(input.unit),
+    name: collapse(input.name),
+    phone: normalizePhone(input.phone),
+    purpose: collapse(input.purpose),
+    expectedReturnAt: new Date(input.expectedReturnAt).toISOString(),
+    condition: collapse(input.condition),
+    notes: collapse(input.notes),
+    token,
+    privacyAck: true
+  };
+  const routed = await postPublic('/api/hkp/public/borrow', payload);
+  if (routed.status === 200 && routed.data?.requestNumber) {
+    return { requestNumber: routed.data.requestNumber, token, via: 'route' };
+  }
+  if (routed.status && routed.status !== 404) throw new Error(routed.data?.message || HOOK_MISSING);
+
+  const client = requireClient();
+  const record = await client.collection(PB.borrowRequests).create({
+    request_number: createRequestNumber('BR'),
+    borrower_unit: payload.unit,
+    borrower_name: payload.name,
+    borrower_phone: payload.phone,
+    asset: payload.assetId,
+    purpose: payload.purpose,
+    requested_at: new Date().toISOString(),
+    expected_return_at: payload.expectedReturnAt,
+    status: 'pending',
+    public_token_hash: await hashToken(token),
+    notes: payload.notes,
+    checkout_condition: payload.condition,
+    privacy_ack: true
+  });
+  return { requestNumber: record.request_number, token, via: 'rule' };
+}
+
+export async function submitReservation(input) {
+  assertPerson(input);
+  if (!input.assetId) throw new Error('請先選擇財產');
+  if (!input.startAt || !input.endAt) throw new Error('請選擇預借時段');
+  if (new Date(input.endAt) <= new Date(input.startAt)) throw new Error('結束時間必須晚於開始時間');
+  if (new Date(input.startAt) <= new Date()) throw new Error('不可預借過去時間');
+  if (!collapse(input.purpose)) throw new Error('請填寫用途');
+  if (!input.privacyAck) throw new Error('請先勾選個資使用告知');
+  if (await reservationConflict(input.assetId, input.startAt, input.endAt)) throw new Error('此時段與其他有效預借重疊');
+
+  const token = createPublicToken();
+  const payload = {
+    assetId: input.assetId,
+    unit: collapse(input.unit),
+    name: collapse(input.name),
+    phone: normalizePhone(input.phone),
+    purpose: collapse(input.purpose),
+    startAt: new Date(input.startAt).toISOString(),
+    endAt: new Date(input.endAt).toISOString(),
+    notes: collapse(input.notes),
+    token,
+    privacyAck: true
+  };
+  const routed = await postPublic('/api/hkp/public/reserve', payload);
+  if (routed.status === 200 && routed.data?.requestNumber) {
+    return { requestNumber: routed.data.requestNumber, token, via: 'route' };
+  }
+  if (routed.status && routed.status !== 404) throw new Error(routed.data?.message || HOOK_MISSING);
+
+  const client = requireClient();
+  const record = await client.collection(PB.reservationsV2).create({
+    reservation_number: createRequestNumber('RV'),
+    borrower_unit: payload.unit,
+    borrower_name: payload.name,
+    borrower_phone: payload.phone,
+    asset: payload.assetId,
+    start_at: payload.startAt,
+    end_at: payload.endAt,
+    purpose: payload.purpose,
+    status: 'pending',
+    public_token_hash: await hashToken(token),
+    notes: payload.notes,
+    privacy_ack: true
+  });
+  return { requestNumber: record.reservation_number, token, via: 'rule' };
+}
+
+export async function lookupBorrow(input) {
+  if (!collapse(input.requestNumber) || !collapse(input.token)) throw identityError();
+  assertPerson({ ...input, requireUnit: false });
+  const routed = await postPublic('/api/hkp/public/lookup', {
+    requestNumber: collapse(input.requestNumber),
+    token: collapse(input.token),
+    name: collapse(input.name),
+    phone: normalizePhone(input.phone)
+  });
+  if (routed.status === 200 && routed.data?.requestNumber) return routed.data;
+  if (routed.status === 404) throw new Error(HOOK_MISSING);
+  throw identityError();
+}
+
+export async function submitReturn(input) {
+  if (!collapse(input.requestNumber) || !collapse(input.token)) throw identityError();
+  assertPerson({ ...input, requireUnit: false });
+  if (!collapse(input.condition)) throw new Error('請填寫物品歸還狀況');
+  const routed = await postPublic('/api/hkp/public/return', {
+    requestNumber: collapse(input.requestNumber),
+    token: collapse(input.token),
+    name: collapse(input.name),
+    phone: normalizePhone(input.phone),
+    propertyId: collapse(input.propertyId),
+    condition: collapse(input.condition),
+    notes: collapse(input.notes)
+  });
+  if (routed.status === 200) return routed.data || { ok: true };
+  if (routed.status === 404) throw new Error(HOOK_MISSING);
+  throw identityError();
+}
+
+export async function cancelReservation(input) {
+  if (!collapse(input.requestNumber) || !collapse(input.token)) throw identityError();
+  assertPerson({ ...input, requireUnit: false });
+  const routed = await postPublic('/api/hkp/public/cancel', {
+    requestNumber: collapse(input.requestNumber),
+    token: collapse(input.token),
+    name: collapse(input.name),
+    phone: normalizePhone(input.phone)
+  });
+  if (routed.status === 200) return { ok: true };
+  if (routed.status === 404) throw new Error(HOOK_MISSING);
+  throw identityError();
+}
+
+function requireDesk() {
+  if (!isStaff()) throw new Error('請先以經辦或管理者登入');
+}
+
+function maskRow(row) {
+  return {
+    id: row.id,
+    number: row.request_number || row.reservation_number || '',
+    unit: row.borrower_unit || '',
+    name: row.borrower_name || '',
+    phoneMasked: maskPhone(row.borrower_phone),
+    phone: row.borrower_phone || '',
+    asset: row.asset,
+    purpose: row.purpose || '',
+    status: row.status,
+    startAt: row.start_at || row.requested_at || row.borrowed_at || '',
+    endAt: row.end_at || row.expected_return_at || '',
+    notes: row.notes || '',
+    condition: row.checkout_condition || row.condition || ''
+  };
+}
+
+export async function listDesk(kind, status) {
+  requireDesk();
+  const client = requireClient();
+  const collection = kind === 'reservation' ? PB.reservationsV2 : kind === 'return' ? PB.returnRequests : PB.borrowRequests;
+  const filter = status ? `status = "${status}"` : '';
+  const rows = await client.collection(collection).getFullList({
+    filter,
+    sort: '-created',
+    expand: 'asset'
+  });
+  return rows.map((row) => ({
+    ...maskRow(row),
+    assetName: row.expand?.asset?.name || '',
+    propertyId: row.expand?.asset?.property_id || ''
+  }));
+}
+
+export async function revealPhone(collectionName, id) {
+  requireDesk();
+  const client = requireClient();
+  const row = await client.collection(collectionName).getOne(id, { fields: 'id,borrower_phone' });
+  try {
+    await client.collection(PB.logs).create({
+      action: '查看電話',
+      entity_type: collectionName,
+      entity_id: id,
+      actor_name: getProfile()?.display_name || '經辦',
+      detail: { event: 'reveal_phone', recordId: id }
+    });
+  } catch {
+    // 紀錄失敗不顯示電話以外的錯誤，也不把電話寫進 log
+  }
+  return row.borrower_phone || '';
+}
+
+async function writeUsage(asset, extra) {
+  const client = requireClient();
+  const payload = {
+    asset: asset.id,
+    user_name: extra.userName,
+    user_number: 'PUBLIC',
+    department: extra.department,
+    used_at: extra.usedAt,
+    purpose: extra.purpose,
+    note: extra.note,
+    property_id: asset.property_id || '',
+    property_name: asset.name || ''
+  };
+  return client.collection(PB.usage).create(payload);
+}
+
+export async function confirmCheckout(id) {
+  requireDesk();
+  const client = requireClient();
+  const routed = await client.send(`/api/hkp/staff/borrow-confirm`, { method: 'POST', body: { id } }).catch((error) => error);
+  if (routed && routed.requestNumber) return routed;
+  const row = await client.collection(PB.borrowRequests).getOne(id, { expand: 'asset' });
+  if (row.status !== 'pending') throw new Error('此申請不是待確認借出');
+  const asset = row.expand?.asset;
+  if (!asset?.id) throw new Error('找不到財產');
+  if (await activeLoanExists(asset.id)) throw new Error('同一財產不可同時借給兩人');
+  const borrowedAt = new Date().toISOString();
+  const updated = await client.collection(PB.borrowRequests).update(id, {
+    status: 'borrowed'
+  });
+  const record = await client.collection(PB.borrowRecords).create({
+    borrow_request: id,
+    asset: asset.id,
+    borrower_unit: row.borrower_unit,
+    borrower_name: row.borrower_name,
+    borrower_phone: row.borrower_phone,
+    purpose: row.purpose || '',
+    borrowed_at: borrowedAt,
+    expected_return_at: row.expected_return_at,
+    status: 'borrowed',
+    checkout_condition: row.checkout_condition || '',
+    processed_by: getProfile()?.id
+  });
+  await client.collection(PB.assets).update(asset.id, {
+    availability_status: 'checked_out',
+    current_loan: record.id
+  });
+  try {
+    await writeUsage(asset, {
+      userName: row.borrower_name,
+      department: row.borrower_unit,
+      usedAt: borrowedAt,
+      purpose: row.purpose || '借用',
+      note: `借用確認 ${row.request_number}`
+    });
+  } catch (error) {
+    await client.collection(PB.borrowRequests).update(id, { status: 'pending' }).catch(() => {});
+    await client.collection(PB.borrowRecords).delete(record.id).catch(() => {});
+    await client.collection(PB.assets).update(asset.id, {
+      availability_status: asset.availability_status || 'available',
+      current_loan: asset.current_loan || null
+    }).catch(() => {});
+    throw new Error(pbMessage(error, '確認借出未完成，狀態已回復'));
+  }
+  return updated;
+}
+
+export async function reviewReservation(id, action, reason = '') {
+  requireDesk();
+  const client = requireClient();
+  const row = await client.collection(PB.reservationsV2).getOne(id);
+  if (row.status !== 'pending') throw new Error('只能處理待審核預借');
+  const status = action === 'approve' ? 'approved' : 'rejected';
+  return client.collection(PB.reservationsV2).update(id, {
+    status,
+    rejection_reason: status === 'rejected' ? collapse(reason) : ''
+  });
+}
+
+export async function confirmReturn(id) {
+  requireDesk();
+  const client = requireClient();
+  const request = await client.collection(PB.returnRequests).getOne(id);
+  if (request.status !== 'pending') throw new Error('此歸還申請已處理');
+  const borrow = await client.collection(PB.borrowRequests).getOne(request.borrow_request);
+  if (borrow.status === 'returned') throw new Error('已歸還紀錄不可再次歸還');
+  const now = new Date().toISOString();
+  await client.collection(PB.borrowRequests).update(borrow.id, { status: 'returned' });
+  const records = await client.collection(PB.borrowRecords).getFullList({
+    filter: `borrow_request = "${borrow.id}" && status != "returned"`
+  });
+  await Promise.all(records.map((record) => client.collection(PB.borrowRecords).update(record.id, {
+    status: 'returned',
+    returned_at: now,
+    return_condition: request.condition || '',
+    returned_by: getProfile()?.id
+  })));
+  if (borrow.asset) {
+    await client.collection(PB.assets).update(borrow.asset, {
+      availability_status: 'available',
+      current_loan: null
+    });
+  }
+  return client.collection(PB.returnRequests).update(id, { status: 'confirmed' });
+}
+
+export function phonesEqual(left, right) {
+  return phonesMatch(left, right);
+}
+
+export function friendlyBorrowError(error) {
+  return pbMessage(error, error?.message || '無法完成借用作業');
+}

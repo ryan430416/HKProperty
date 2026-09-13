@@ -12,8 +12,111 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <div id="publicPortal" class="public-portal">
+    <header class="portal-top">
+      <div>
+        <p class="eyebrow">弘光科技大學</p>
+        <h1>財產借用</h1>
+      </div>
+      <button type="button" class="ghost-btn" id="staffLoginOpen">經辦／管理登入</button>
+    </header>
+    <div data-portal-step="home" class="portal-home">
+      <button type="button" class="portal-action" id="portalHomeReserve">我要預借</button>
+      <button type="button" class="portal-action" id="portalHomeBorrow">我要借用</button>
+      <button type="button" class="portal-action" id="portalHomeReturn">我要歸還</button>
+      <div class="portal-tools">
+        <button type="button" class="secondary" id="portalScanBtn">掃描財產 QR Code</button>
+        <form id="portalSearchForm" class="portal-search">
+          <label class="sr-only" for="portalQuery">財產編號或名稱</label>
+          <input id="portalQuery" type="search" maxlength="80" placeholder="輸入財產編號或物品名稱" />
+          <button type="submit" class="primary">搜尋</button>
+        </form>
+      </div>
+      <div id="portalCamera" hidden><video id="portalCameraVideo" playsinline></video></div>
+      <p class="muted portal-foot">不需註冊或登入。只會顯示物品圖片、名稱、編號、可借用狀態與取件位置。</p>
+      <button type="button" class="text-btn" id="portalLoginFoot">經辦／管理登入</button>
+    </div>
+    <div data-portal-step="search" hidden>
+      <button type="button" class="ghost-btn" id="portalBack">回首頁</button>
+      <div id="portalResults"></div>
+    </div>
+    <form data-portal-step="form" id="portalForm" class="portal-form" hidden>
+      <button type="button" class="ghost-btn" id="portalFormBack">返回</button>
+      <h2 id="portalFormTitle">借用</h2>
+      <p id="portalAssetBox" class="portal-asset"></p>
+      <div class="field" id="portalUnitWrap">
+        <label for="portalUnit">單位 <span class="req">必填</span></label>
+        <input id="portalUnit" maxlength="50" autocomplete="organization" />
+      </div>
+      <div class="field">
+        <label for="portalName">姓名 <span class="req">必填</span></label>
+        <input id="portalName" maxlength="30" autocomplete="name" />
+      </div>
+      <div class="field">
+        <label for="portalPhone">電話 <span class="req">必填</span></label>
+        <input id="portalPhone" maxlength="20" inputmode="tel" autocomplete="tel" />
+      </div>
+      <div id="portalReserveFields" hidden>
+        <div class="field"><label for="portalStart">預借開始時間</label><input id="portalStart" type="datetime-local" /></div>
+        <div class="field"><label for="portalEnd">預計歸還時間</label><input id="portalEnd" type="datetime-local" /></div>
+        <div class="field"><label for="portalReservePurpose">用途</label><input id="portalReservePurpose" maxlength="80" /></div>
+      </div>
+      <div id="portalBorrowFields" hidden>
+        <div class="field"><label for="portalReturnAt">預計歸還時間</label><input id="portalReturnAt" type="datetime-local" /></div>
+        <div class="field"><label for="portalPurpose">用途</label><input id="portalPurpose" maxlength="80" /></div>
+        <div class="field"><label for="portalCondition">物品借出狀況</label><input id="portalCondition" maxlength="80" /></div>
+      </div>
+      <div id="portalReturnFields" hidden>
+        <div class="field"><label for="portalRequestNumber">借用編號</label><input id="portalRequestNumber" maxlength="40" autocomplete="off" /></div>
+        <div class="field"><label for="portalToken">歸還驗證碼</label><input id="portalToken" maxlength="80" autocomplete="off" /></div>
+        <div class="field"><label for="portalReturnProperty">財產編號</label><input id="portalReturnProperty" maxlength="40" /></div>
+        <div class="field"><label for="portalReturnCondition">物品歸還狀況</label><input id="portalReturnCondition" maxlength="80" /></div>
+      </div>
+      <div class="field"><label for="portalNote">備註</label><textarea id="portalNote" maxlength="200"></textarea></div>
+      <label class="choice" id="portalPrivacyWrap"><input id="portalPrivacy" type="checkbox" /> <span id="portalPrivacyText"></span></label>
+      <div class="portal-actions">
+        <button type="submit" class="primary" id="portalSubmit">送出</button>
+        <button type="button" class="secondary" id="portalLookupBtn">查詢我的申請</button>
+      </div>
+    </form>
+    <section data-portal-step="issued" hidden class="portal-issued">
+      <h2>請保存以下資料</h2>
+      <p>申請編號與歸還驗證碼只顯示這一次。系統不保存驗證碼明文。</p>
+      <p>申請編號：<strong id="issuedNumber"></strong></p>
+      <p>歸還驗證碼：<strong id="issuedToken"></strong></p>
+      <button type="button" class="primary" id="portalDone">回首頁</button>
+    </section>
+    <form id="portalCancelForm" class="portal-cancel">
+      <h2>取消尚未核准的預借</h2>
+      <input id="cancelNumber" placeholder="申請編號" maxlength="40" autocomplete="off" />
+      <input id="cancelToken" placeholder="驗證碼" maxlength="80" autocomplete="off" />
+      <input id="cancelName" placeholder="姓名" maxlength="30" />
+      <input id="cancelPhone" placeholder="電話" maxlength="20" />
+      <button type="submit" class="secondary">取消預借</button>
+    </form>
+    <p id="portalMessage" class="portal-message" hidden></p>
+  </div>
+  <dialog id="staffLoginDialog">
+    <form id="staffLoginForm" method="dialog">
+      <h2>經辦／管理登入</h2>
+      <p class="muted">登入後依帳號角色進入對應後台，不能自行選擇角色。</p>
+      <div class="field">
+        <label for="staffEmail">電子郵件</label>
+        <input id="staffEmail" type="email" autocomplete="username" required />
+      </div>
+      <div class="field">
+        <label for="staffPassword">密碼</label>
+        <input id="staffPassword" type="password" autocomplete="current-password" required />
+      </div>
+      <div class="dialog-actions">
+        <button type="submit" class="primary" id="staffLoginBtn">登入</button>
+        <button type="button" class="ghost-btn" id="staffLoginClose">取消</button>
+      </div>
+      <div id="testModeEntry" hidden></div>
+    </form>
+  </dialog>
   <a class="skip-link" href="#main">跳到主要內容</a>
-  <div class="app">
+  <div class="app" hidden>
     <aside class="sidebar" id="sidebar" aria-label="主要導覽">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">弘</span>
@@ -23,22 +126,21 @@
         </div>
       </div>
       <nav class="side-nav">
-        <button type="button" class="nav-item active" data-view="dashboard">系統總覽</button>
-        <button type="button" class="nav-item" data-view="selfService">自助借還</button>
-        <button type="button" class="nav-item" data-view="inventory">財產清冊</button>
-        <button type="button" class="nav-item" data-min-role="staff" data-view="loans">借出管理</button>
-        <button type="button" class="nav-item" data-view="loanHistory">借用紀錄</button>
-        <button type="button" class="nav-item" data-view="myReservations">我的預借</button>
-        <button type="button" class="nav-item" data-min-role="staff" data-view="reservations">預借管理</button>
-        <button type="button" class="nav-item" data-min-role="staff" data-view="audit">盤點作業</button>
-        <button type="button" class="nav-item" data-min-role="staff" data-view="usage">使用紀錄</button>
-        <button type="button" class="nav-item" data-min-role="staff" data-view="locations">位置管理</button>
-        <button type="button" class="nav-item" data-min-role="staff" data-view="logs">操作紀錄</button>
-        <button type="button" class="nav-item" data-min-role="admin" data-view="users">使用者管理</button>
-        <button type="button" class="nav-item" data-min-role="staff" data-view="settings">系統設定</button>
+        <button type="button" class="nav-item" data-min-role="staff" data-view="staffDesk">借用管理</button>
+        <button type="button" class="nav-item" data-min-role="admin" data-view="dashboard">系統總覽</button>
+        <button type="button" class="nav-item" data-min-role="admin" data-view="inventory">財產清冊</button>
+        <button type="button" class="nav-item" data-min-role="admin" data-view="loans">借出管理</button>
+        <button type="button" class="nav-item" data-min-role="admin" data-view="loanHistory">借用紀錄</button>
+        <button type="button" class="nav-item" data-min-role="admin" data-view="reservations">預借管理</button>
+        <button type="button" class="nav-item" data-min-role="admin" data-view="audit">盤點作業</button>
+        <button type="button" class="nav-item" data-min-role="admin" data-view="usage">使用紀錄</button>
+        <button type="button" class="nav-item" data-min-role="admin" data-view="locations">位置管理</button>
+        <button type="button" class="nav-item" data-min-role="admin" data-view="logs">操作紀錄</button>
+        <button type="button" class="nav-item" data-min-role="admin" data-view="users">經辦人員管理</button>
+        <button type="button" class="nav-item" data-min-role="admin" data-view="settings">系統設定</button>
       </nav>
       <button type="button" class="scan-btn" id="scanBtn">掃描財產 QR Code</button>
-      <p class="side-foot" id="sideFoot">測試模式可先用假帳號進入，資料只存在此瀏覽器</p>
+      <p class="side-foot" id="sideFoot">經辦與管理者須登入後使用後台</p>
     </aside>
 
     <div class="shell">
@@ -56,7 +158,7 @@
         </div>
         <form class="global-search" id="globalSearchForm" role="search">
           <label class="sr-only" for="globalSearch">全站搜尋</label>
-          <input id="globalSearch" name="q" type="search" placeholder="搜尋財產編號、名稱、地點、保管人…" />
+          <input id="globalSearch" name="q" type="search" placeholder="搜尋財產編號、名稱、地點…" />
           <button type="submit" class="ghost-btn">搜尋</button>
         </form>
         <button type="button" class="icon-btn scan-icon" id="scanBtnMobile" aria-label="掃描財產 QR Code">QR</button>
@@ -80,22 +182,13 @@
         </div>
       </header>
 
-        <div id="authGate" class="auth-gate">
+        <div id="authGate" class="auth-gate" hidden>
           <article class="panel login-card">
-            <p class="eyebrow">測試模式</p>
-            <h2>先測功能，不必正式登入</h2>
-            <p class="muted">資料只存在這個瀏覽器分頁。預設以「借用人」進入；若要看經辦或管理畫面再另外選。</p>
+            <p class="eyebrow">後台</p>
+            <h2>請由首頁的經辦／管理登入進入</h2>
             <p id="authBackendStatus" class="backend-status-inline" data-mode="unset">正在檢查後端連線…</p>
-            <div class="demo-login">
-              <button type="button" class="primary" id="demoBorrowerBtn">以借用人進入測試</button>
-              <div class="demo-login-row">
-                <button type="button" class="secondary" id="demoStaffBtn">以經辦人員進入</button>
-                <button type="button" class="ghost-btn" id="demoAdminBtn">以管理者進入</button>
-              </div>
-            </div>
-            <details class="login-real" id="loginRealDetails">
-              <summary>使用 PocketBase 正式登入</summary>
-              <p class="muted">正式模式會寫入雲端資料庫。請確認上方狀態為「PocketBase 正式模式」後再登入。</p>
+            <details class="login-real" id="loginRealDetails" hidden>
+              <summary>舊登入表單</summary>
               <form id="loginForm">
                 <div class="field">
                   <label for="loginEmail">電子郵件 <span class="req">必填</span></label>
@@ -112,8 +205,7 @@
                 </div>
                 <div class="ss-sticky login-actions">
                   <button type="submit" class="primary" id="loginSubmitBtn">登入</button>
-                  <button type="button" class="secondary" id="registerBtn">註冊借用人帳號</button>
-                  <button type="button" class="ghost-btn" id="otpBtn">寄送一次性密碼</button>
+                  <button type="button" class="ghost-btn" id="otpBtn" hidden>寄送一次性密碼</button>
                 </div>
               </form>
             </details>
@@ -129,6 +221,19 @@
           <button type="button" class="primary" id="reloadBtn">重新載入</button>
         </div>
 
+        <section class="view" id="view-staffDesk" hidden aria-label="借用管理">
+          <div class="panel">
+            <h2>借用管理</h2>
+            <div class="portal-actions" id="deskFilters">
+              <button type="button" data-desk="borrow" data-status="pending">待確認借出</button>
+              <button type="button" data-desk="reservation" data-status="pending">待處理預借</button>
+              <button type="button" data-desk="borrow" data-status="borrowed">借出中</button>
+              <button type="button" data-desk="return" data-status="pending">待確認歸還</button>
+              <button type="button" data-desk="borrow" data-status="return_pending">歸還申請中</button>
+            </div>
+            <div id="deskList"></div>
+          </div>
+        </section>
         <section class="view" id="view-dashboard" hidden aria-label="系統總覽">
           <div class="kiosk-grid" aria-label="自助借還入口">
             <button type="button" class="kiosk-btn" data-self="borrow">
@@ -635,8 +740,17 @@
 
         <section class="view" id="view-users" hidden aria-label="使用者管理">
           <div class="panel">
-            <h2>使用者與角色</h2>
-            <p class="muted">新註冊帳號預設為借用人。角色異動會留下操作紀錄。</p>
+            <h2>經辦人員管理</h2>
+            <p class="muted">可建立、停用或重設經辦人員帳號。無法查看明文密碼。</p>
+            <form id="staffCreateForm" class="filters">
+              <div class="field"><label for="newStaffName">姓名</label><input id="newStaffName" maxlength="40" required /></div>
+              <div class="field"><label for="newStaffNumber">員工編號</label><input id="newStaffNumber" maxlength="40" required /></div>
+              <div class="field"><label for="newStaffEmail">電子郵件</label><input id="newStaffEmail" type="email" required /></div>
+              <div class="field"><label for="newStaffPassword">初始密碼</label><input id="newStaffPassword" type="password" minlength="8" required /></div>
+              <div class="field"><label for="newStaffDept">單位</label><input id="newStaffDept" maxlength="50" /></div>
+              <div class="field"><label for="newStaffPhone">電話</label><input id="newStaffPhone" maxlength="20" /></div>
+              <div class="field field-action"><button type="submit" class="primary">建立經辦人員</button></div>
+            </form>
             <div id="userManageList"></div>
           </div>
         </section>

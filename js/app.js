@@ -59,21 +59,25 @@ import {
 } from '../services/loanService.js';
 import {
   adminUpdateProfile,
+  createStaffAccount,
   getProfile,
   initAuth,
   isAdmin,
   isStaff,
   listProfiles,
-  registerWithPassword,
+  requestStaffPasswordReset,
   roleLabel,
-  sendLoginOtp,
   enterDemoSession,
   isDemoMode,
   signInWithPassword,
   signOut,
-  updateMyProfile,
-  verifyEmailOtp
+  testModeEnabled,
+  updateMyProfile
 } from '../services/authService.js';
+import { PB } from '../pocketbase/schema.mjs';
+import { confirmCheckout, confirmReturn, listDesk, revealPhone, reviewReservation } from '../services/publicBorrow.js';
+import { maskPhone } from '../services/privacy.js';
+import { bindPublicPortal, hidePublicPortal, openPortalFromScan, showPublicPortal } from './publicPortal.js';
 import {
   approveReservation,
   cancelReservation,
@@ -100,7 +104,9 @@ import {
   requirePocketBaseReady
 } from '../services/backendStatus.js';
 
+const STAFF_VIEWS = new Set(['staffDesk']);
 const PAGE_META = {
+  staffDesk: ['借用作業', '借用管理'],
   dashboard: ['財產管理', '系統總覽'],
   selfService: ['自助服務', '自助借還'],
   inventory: ['財產查詢', '財產清冊'],
@@ -117,7 +123,9 @@ const PAGE_META = {
 };
 
 const state = {
-  view: 'dashboard',
+  view: 'staffDesk',
+  deskKind: 'borrow',
+  deskStatus: 'pending',
   page: 1,
   auditPage: 1,
   usagePage: 1,
@@ -302,7 +310,24 @@ function loanDueText(item) {
   return loan && isOpenLoan(loan) ? formatDateTime(loan.expectedReturnAt) : '—';
 }
 
+function allowedView(view) {
+  if (!getProfile()) return null;
+  if (isAdmin() || isDemoMode()) return view;
+  return STAFF_VIEWS.has(view) ? view : null;
+}
+
 function setView(view) {
+  if (!getProfile()) {
+    showPublicPortal();
+    return;
+  }
+  const next = allowedView(view);
+  if (!next) {
+    if (getProfile()) toast('沒有權限使用此頁面', 'error');
+    view = isStaff() ? 'staffDesk' : 'dashboard';
+  } else {
+    view = next;
+  }
   stopCameraScan();
   refreshOverdueStatus();
   const previous = state.view;
@@ -695,7 +720,7 @@ function renderSettings() {
 
 async function renderUsers() {
   if (!isAdmin()) {
-    $('userManageList').innerHTML = '<div class="empty">只有管理者可以管理使用者</div>';
+    $('userManageList').innerHTML = '<div class="empty">只有管理者可以管理經辦人員</div>';
     return;
   }
   try {
@@ -704,19 +729,42 @@ async function renderUsers() {
       <div class="audit-item">
         <div>
           <strong>${esc(row.display_name || '未命名')}</strong>
-          <div class="muted">${esc(row.school_number || '未填學號')} · ${esc(row.department || '未填單位')}</div>
-          <div class="muted">${row.is_active ? '啟用中' : '已停用'}</div>
+          <div class="muted">${esc(row.employee_number || '未填編號')} · ${esc(row.department || '未填單位')} · ${esc(roleLabel(row.role))}</div>
+          <div class="muted">${row.is_active ? '啟用中' : '已停用'} · 電話 ${esc(maskPhone(row.phone) || '未填')} · 最後登入 ${esc(row.last_login_at ? formatDateTime(row.last_login_at) : '尚無')}</div>
         </div>
-        <select data-role-user="${esc(row.id)}">
-          <option value="borrower" ${row.role === 'borrower' ? 'selected' : ''}>借用人</option>
-          <option value="staff" ${row.role === 'staff' ? 'selected' : ''}>經辦人員</option>
-          <option value="admin" ${row.role === 'admin' ? 'selected' : ''}>管理者</option>
-        </select>
+        <button type="button" class="secondary" data-reset-user="${esc(row.email)}">重設密碼</button>
         <button type="button" class="secondary" data-toggle-user="${esc(row.id)}" data-active="${row.is_active ? '1' : '0'}">${row.is_active ? '停用' : '啟用'}</button>
       </div>
-    `).join('') || '<div class="empty">尚無使用者</div>';
+    `).join('') || '<div class="empty">尚無經辦人員</div>';
   } catch (error) {
     $('userManageList').innerHTML = `<div class="empty">${esc(error.message)}</div>`;
+  }
+}
+
+async function renderStaffDesk() {
+  const list = $('deskList');
+  if (!list) return;
+  if (!isStaff()) {
+    list.innerHTML = '<div class="empty">沒有權限</div>';
+    return;
+  }
+  try {
+    const rows = await listDesk(state.deskKind || 'borrow', state.deskStatus || 'pending');
+    list.innerHTML = rows.length ? rows.map((row) => {
+      const overdue = row.status === 'borrowed' && row.endAt && new Date(row.endAt) < new Date();
+      return `<article class="desk-item ${overdue ? 'overdue' : ''}">
+        <strong>${esc(row.number || row.id)} · ${esc(row.assetName || '財產')} ${esc(row.propertyId || '')}</strong>
+        <div>${esc(row.unit)} ${esc(row.name)} · ${esc(row.phoneMasked)} · ${esc(row.status)}${overdue ? ' · 已逾期' : ''}</div>
+        <div class="portal-actions">
+          <button type="button" data-reveal="${esc(row.id)}" data-collection="${state.deskKind === 'reservation' ? PB.reservationsV2 : state.deskKind === 'return' ? PB.returnRequests : PB.borrowRequests}">查看電話</button>
+          ${row.status === 'pending' && state.deskKind === 'reservation' ? `<button type="button" data-approve-res="${esc(row.id)}">核准</button><button type="button" data-reject-res="${esc(row.id)}">拒絕</button>` : ''}
+          ${row.status === 'pending' && state.deskKind !== 'reservation' && state.deskKind !== 'return' ? `<button type="button" data-confirm-out="${esc(row.id)}">確認借出</button>` : ''}
+          ${state.deskKind === 'return' && row.status === 'pending' ? `<button type="button" data-confirm-return="${esc(row.id)}">確認歸還</button>` : ''}
+        </div>
+      </article>`;
+    }).join('') : '<div class="empty">目前沒有待處理項目</div>';
+  } catch (error) {
+    list.innerHTML = `<div class="empty">${esc(error.message)}</div>`;
   }
 }
 
@@ -765,6 +813,7 @@ function render() {
   refreshOverdueStatus();
   refreshFilterOptions();
   renderNotify();
+  if (state.view === 'staffDesk') renderStaffDesk();
   if (state.view === 'dashboard') renderDashboard();
   if (state.view === 'inventory') renderInventory();
   if (state.view === 'loans') renderLoans();
@@ -1168,6 +1217,13 @@ function openScan() {
 
 function lookupScan(raw) {
   const code = parseScanPayload(raw);
+  if (isStaff() && !isAdmin()) {
+    resetScanCameraUi();
+    closeDialog('scanDialog');
+    setView('staffDesk');
+    toast(`已掃描 ${code}，請在借用管理中核對申請`);
+    return true;
+  }
   const item = findByPropertyId(code);
   if (!item) {
     if ($('scanError')) $('scanError').textContent = `找不到財產編號「${code}」，請確認後再試。`;
@@ -1818,54 +1874,97 @@ function bindEvents() {
       toast(error.message || '無法進入測試', 'error');
     }
   }
-  $('demoAdminBtn').addEventListener('click', () => startDemo('admin'));
-  $('demoStaffBtn').addEventListener('click', () => startDemo('staff'));
-  $('demoBorrowerBtn').addEventListener('click', () => startDemo('borrower'));
-
-  $('loginForm').addEventListener('submit', async (event) => {
+  if (testModeEnabled() && $('testModeEntry')) {
+    $('testModeEntry').hidden = false;
+    $('testModeEntry').innerHTML = '<p class="muted">本機測試模式</p><button type="button" class="secondary" id="demoStaffBtn">以經辦人員進入</button><button type="button" class="ghost-btn" id="demoAdminBtn">以管理者進入</button>';
+  }
+  $('demoAdminBtn')?.addEventListener('click', () => startDemo('admin'));
+  $('demoStaffBtn')?.addEventListener('click', () => startDemo('staff'));
+  $('staffLoginOpen') && bindPublicPortal(() => $('staffLoginDialog')?.showModal());
+  $('staffLoginClose')?.addEventListener('click', () => $('staffLoginDialog')?.close());
+  $('staffLoginForm')?.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const btn = $('loginSubmitBtn');
+    const btn = $('staffLoginBtn');
     btn.disabled = true;
     try {
-      const email = $('loginEmail').value;
-      const password = $('loginPassword').value;
-      const otp = $('loginOtp').value.trim();
-      if (otp) {
-        await verifyEmailOtp(email, otp);
-        toast('登入成功');
-        await bootApp();
-      } else {
-        await signInWithPassword(email, password);
-        toast('登入成功');
-        await bootApp();
-      }
+      await signInWithPassword($('staffEmail').value, $('staffPassword').value);
+      $('staffPassword').value = '';
+      $('staffLoginDialog')?.close();
+      await bootApp();
     } catch (error) {
       toast(error.message || '登入失敗', 'error');
     } finally {
       btn.disabled = false;
     }
   });
-  $('registerBtn').addEventListener('click', async () => {
-    const btn = $('registerBtn');
+  $('deskFilters')?.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-desk]');
+    if (!btn) return;
+    state.deskKind = btn.dataset.desk;
+    state.deskStatus = btn.dataset.status;
+    renderStaffDesk();
+  });
+  document.addEventListener('click', async (event) => {
+    const out = event.target.closest('[data-confirm-out]');
+    const approve = event.target.closest('[data-approve-res]');
+    const reject = event.target.closest('[data-reject-res]');
+    const ret = event.target.closest('[data-confirm-return]');
+    const reveal = event.target.closest('[data-reveal]');
+    const reset = event.target.closest('[data-reset-user]');
+    try {
+      if (out) await confirmCheckout(out.dataset.confirmOut);
+      else if (approve) await reviewReservation(approve.dataset.approveRes, 'approve');
+      else if (reject) await reviewReservation(reject.dataset.rejectRes, 'reject');
+      else if (ret) await confirmReturn(ret.dataset.confirmReturn);
+      else if (reveal) {
+        const phone = await revealPhone(reveal.dataset.collection, reveal.dataset.reveal);
+        toast(maskPhone(phone) ? `電話 ${phone}` : '沒有電話');
+        return;
+      } else if (reset) {
+        await requestStaffPasswordReset(reset.dataset.resetUser);
+        toast('已送出重設密碼');
+        return;
+      } else return;
+      toast('已更新');
+      renderStaffDesk();
+    } catch (error) {
+      if (out || approve || reject || ret || reveal || reset) toast(error.message || '操作失敗', 'error');
+    }
+  });
+  $('staffCreateForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await createStaffAccount({
+        name: $('newStaffName').value,
+        employeeNumber: $('newStaffNumber').value,
+        email: $('newStaffEmail').value,
+        password: $('newStaffPassword').value,
+        department: $('newStaffDept').value,
+        phone: $('newStaffPhone').value
+      });
+      event.target.reset();
+      await renderUsers();
+      toast('已建立經辦人員');
+    } catch (error) {
+      toast(error.message || '無法建立', 'error');
+    }
+  });
+
+  $('loginForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const btn = $('loginSubmitBtn');
     btn.disabled = true;
     try {
-      await registerWithPassword($('loginEmail').value, $('loginPassword').value);
-      toast('已註冊並登入，預設為借用人');
+      await signInWithPassword($('loginEmail').value, $('loginPassword').value);
+      toast('登入成功');
       await bootApp();
     } catch (error) {
-      toast(error.message || '註冊失敗', 'error');
+      toast(error.message || '登入失敗', 'error');
     } finally {
       btn.disabled = false;
     }
   });
-  $('otpBtn').addEventListener('click', async () => {
-    try {
-      await sendLoginOtp($('loginEmail').value);
-      toast('已寄送一次性密碼，請至信箱查收後填入驗證碼再登入');
-    } catch (error) {
-      toast(error.message || '無法寄送驗證碼', 'error');
-    }
-  });
+  $('otpBtn')?.addEventListener('click', () => toast('請使用電子郵件與密碼登入', 'error'));
   $('logoutBtn').addEventListener('click', async () => {
     await stopCameraScan();
     closeAllDialogs();
@@ -1885,7 +1984,8 @@ function bindEvents() {
     clearReservationCache();
     beginModeCheck();
     applyRoleNav();
-    showAuthGate(true);
+    showAuthGate(false);
+    showPublicPortal();
     toast('已登出');
     await probePocketBase();
     applyRoleNav();
@@ -1982,12 +2082,13 @@ function showLoadError(message) {
 }
 
 async function bootApp() {
-  if (!getProfile()) {
-    showAuthGate(true);
+  if (!getProfile() || (!isStaff() && !isDemoMode())) {
+    showPublicPortal();
     setLoading(false);
     updateBackendStatusUi();
     return;
   }
+  hidePublicPortal();
   applyRoleNav();
   showAuthGate(false);
   $('loadError').hidden = true;
@@ -2027,7 +2128,7 @@ async function bootApp() {
         // ignore
       }
     } else {
-      setView(isStaff() ? 'dashboard' : 'selfService');
+      setView(isAdmin() ? 'dashboard' : 'staffDesk');
     }
     toast(`已載入 ${listItems().length} 筆財產`);
   } catch (error) {
@@ -2040,17 +2141,28 @@ async function init() {
   bindEvents();
   $('loadError').hidden = true;
   const pendingDeep = readAssetDeepLink();
+  showPublicPortal();
   if (pendingDeep?.propertyId) {
-    sessionStorage.setItem('hkp-pending-asset', JSON.stringify(pendingDeep));
+    await openPortalFromScan(pendingDeep.propertyId);
   }
-  setLoading(true, '檢查登入狀態…');
   await probePocketBase();
   updateBackendStatusUi();
+  window.addEventListener('hashchange', () => {
+    const view = window.location.hash.replace(/^#\/?/, '');
+    if (!view) return;
+    if (!getProfile()) {
+      showPublicPortal();
+      window.history.replaceState({}, '', window.location.pathname);
+      return;
+    }
+    setView(view);
+  });
   await initAuth(async (profile) => {
-    if (profile) await bootApp();
+    if (profile && (isStaff() || isDemoMode())) await bootApp();
     else {
       setLoading(false);
-      showAuthGate(true);
+      showAuthGate(false);
+      showPublicPortal();
       updateBackendStatusUi();
     }
   });

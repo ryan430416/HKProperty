@@ -11,7 +11,10 @@
 
 ```env
 VITE_POCKETBASE_URL=https://db.keson.pro
+VITE_ENABLE_TEST_MODE=false
 ```
+
+正式站必須是 `VITE_ENABLE_TEST_MODE=false`。只有本機開發可設 `true`。不要把帳號密碼放進 Vercel。
 
 Vercel Production / Preview / Development 都必須是這個網址。正式站不可指向 `localhost`、`127.0.0.1` 或已失效的 Cloudflare 臨時隧道。改完後必須重新 Deploy，Vite 才會把網址寫進前端。
 
@@ -40,6 +43,100 @@ POCKETBASE_ADMIN_PASSWORD=
 | 系統設定 | `hkp_system_settings` | 核准開關、預設借用天數 |
 
 不要改用未加前綴的 `assets`、`usage_records`。那些名稱在此實例不存在或是空的，前端若連過去會看不到 390 筆。
+
+規格中的名稱在這台共用庫都加 `hkp_` 前綴，避免碰到其他人的 Collection。舊 Collection 沒有刪除。
+
+## 角色重構後的 Collection
+
+### `hkp_staff_users`（對應 `staff_users`，Auth）
+
+| 欄位 | 型別 | 說明 |
+| --- | --- | --- |
+| `email` / `password` | Auth | 由 PocketBase 雜湊，前端不存明文 |
+| `name` | text，必填 | 2–40 字 |
+| `employee_number` | text，必填，唯一 | index `idx_hkp_staff_employee` |
+| `role` | select | `admin` 或 `staff` |
+| `department` / `phone` | text | |
+| `active` / `is_active` | bool | 停用帳號 |
+| `last_login_at` | date | 登入時嘗試寫入；規則若拒絕不影響登入 |
+
+沒有 `created_by` relation。目前不能由前端建立另一個 admin（createRule 只允許 `role = staff`）。第一個管理員用本機腳本建立，密碼不進 Git。
+
+API Rules：
+
+```text
+listRule: @request.auth.role = "admin" && @request.auth.is_active = true && @request.auth.collectionName = "hkp_staff_users" || id = @request.auth.id
+viewRule: 同上
+createRule: @request.auth.role = "admin" && @request.auth.is_active = true && @request.auth.collectionName = "hkp_staff_users" && @request.body.role = "staff"
+updateRule: @request.auth.role = "admin" && @request.auth.is_active = true && @request.auth.collectionName = "hkp_staff_users" && (@request.body.role:isset = false || @request.body.role = role) && (id != @request.auth.id || @request.body.active:isset = false)
+deleteRule: null
+```
+
+### `hkp_assets_guest`（公開 View）
+
+只開放：`property_id`、`name`、`location`、`availability_status`、`is_borrowable`、`is_active`、`photo`。不含保管人、單價、備註。
+
+```text
+listRule: （空白＝公開讀）
+viewRule: （空白＝公開讀）
+createRule / updateRule / deleteRule: null
+```
+
+### `hkp_borrow_requests`（借用申請）
+
+| 欄位 | 型別 |
+| --- | --- |
+| `request_number` | text，唯一 index `idx_hkp_borrow_request_number` |
+| `borrower_unit` / `borrower_name` / `borrower_phone` | text |
+| `asset` | relation → `hkp_assets` |
+| `purpose` / `notes` / `checkout_condition` | text |
+| `requested_at` / `expected_return_at` | date |
+| `status` | select：pending、borrowed、rejected、cancelled、return_pending、returned |
+| `public_token_hash` | text。只存雜湊 |
+| `privacy_ack` | bool |
+
+```text
+listRule / viewRule: @request.auth.role != "" && @request.auth.is_active = true && @request.auth.collectionName = "hkp_staff_users"
+createRule: @request.body.status = "pending" && @request.body.public_token_hash != "" && @request.body.privacy_ack = true
+updateRule: 經辦登入，或待審取消且 header x-hkp-token 等於雜湊
+deleteRule: 僅 hkp_staff_users admin
+```
+
+### `hkp_reservations_v2`（預借）
+
+欄位：`reservation_number`（唯一）、`borrower_unit`、`borrower_name`、`borrower_phone`、`asset` → `hkp_assets`、`start_at`、`end_at`、`purpose`、`status`（pending/approved/rejected/cancelled/converted/expired）、`public_token_hash`、`notes`、`privacy_ack`、`rejection_reason`、`reviewed_at`。Rules 與借用申請相同模式：匿名不可 List/View，建立只能 pending。
+
+### `hkp_borrow_records`（正式借出）
+
+`borrow_request`、`asset`、借用人欄位、`borrowed_at`、`expected_return_at`、`returned_at`、`status`（borrowed/return_pending/returned）、`checkout_condition`、`return_condition`、`processed_by` / `returned_by` → `hkp_staff_users`。List/View/Create/Update 僅經辦與管理員。
+
+### `hkp_return_requests`
+
+`borrow_request`、`request_number`、`asset`、`borrower_name`、`borrower_phone`、`condition`、`notes`、`status`（pending/confirmed/rejected）、`requested_at`。List/View/Update 僅經辦。匿名 create 目前只允許 `status = pending`，正式核對應走自訂 Route。
+
+### `hkp_reservation_public` / `hkp_borrow_slots`
+
+公開 View，只有資產 id、時段與狀態，沒有姓名電話。用來擋重疊與雙重借出，不列出借用人。
+
+## 自訂 Route 與 Hook
+
+檔案：`pb_hooks/public_borrow.pb.js`
+
+```text
+POST /api/hkp/public/borrow
+POST /api/hkp/public/reserve
+POST /api/hkp/public/lookup
+POST /api/hkp/public/cancel
+POST /api/hkp/public/return
+```
+
+伺服器用 `$security.sha256` 只存雜湊，查詢失敗一律回「借用資料驗證失敗，請確認借用編號、姓名及電話。」同一 IP 10 分鐘內失敗 8 次後拒絕。
+
+安裝：把該檔放到 PocketBase 主機的 `pb_hooks/`，重啟 PocketBase。遠端 `db.keson.pro` 目前沒有這支 Route（實測 HTTP 404）。重啟方式依主機而定，一般是重啟 pocketbase 程序或 `systemctl restart pocketbase`。沒有主機權限就不能安裝。
+
+## 回復
+
+不要刪 `hkp_assets`。新 Collection 是新增的，舊的 `hkp_loan_records`、`hkp_asset_reservations`、`hkp_usage_records` 沒有清空。前端回復用還原 Git 後重新部署。已建立的管理員帳號可停用，不要改財產主檔。
 
 ## 主要欄位
 
