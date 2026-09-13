@@ -274,6 +274,7 @@ async function submitBorrow() {
   const btn = $('ssBorrowSubmitBtn');
   state.submitting = true;
   btn.disabled = true;
+  btn.textContent = '處理中';
   try {
     const data = readBorrowForm();
     const result = await checkout(data);
@@ -296,6 +297,7 @@ async function submitBorrow() {
   } finally {
     state.submitting = false;
     btn.disabled = false;
+    btn.textContent = '確認借出';
   }
 }
 
@@ -352,6 +354,7 @@ async function submitReturn() {
   const btn = $('ssReturnSubmitBtn');
   state.submitting = true;
   btn.disabled = true;
+  btn.textContent = '處理中';
   try {
     const data = readReturnForm();
     const result = await checkin(data);
@@ -373,6 +376,7 @@ async function submitReturn() {
   } finally {
     state.submitting = false;
     btn.disabled = false;
+    btn.textContent = '確認歸還';
   }
 }
 

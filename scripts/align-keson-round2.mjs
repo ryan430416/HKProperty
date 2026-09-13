@@ -61,7 +61,15 @@ const borrowerCancel = [
   '@request.body.user_name:isset = false',
   '@request.body.converted_loan:isset = false'
 ].join(' && ');
+const reservationFields = [...(reservations.fields || [])];
+for (const field of [
+  { name: 'user_number', type: 'text' },
+  { name: 'department', type: 'text' }
+]) {
+  if (!reservationFields.some((item) => item.name === field.name)) reservationFields.push(field);
+}
 await pb.collections.update(reservations.id, {
+  fields: reservationFields,
   createRule: `${AUTH} && @request.body.user = @request.auth.id && @request.body.status = "pending"`,
   updateRule: `${STAFF} || (${AUTH} && ${borrowerCancel})`,
   deleteRule: ADMIN
@@ -88,7 +96,7 @@ const borrowerReturn = [
   '@request.body.borrower_department:isset = false'
 ].join(' && ');
 await pb.collections.update(loans.id, {
-  createRule: `${STAFF} || (${AUTH} && @request.body.borrower = @request.auth.id)`,
+  createRule: `(${STAFF} || (${AUTH} && @request.body.borrower = @request.auth.id)) && @request.body.asset.availability_status = "available"`,
   updateRule: `${STAFF} || (${AUTH} && ${borrowerReturn})`,
   deleteRule: ADMIN
 });

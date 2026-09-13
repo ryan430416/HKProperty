@@ -66,6 +66,9 @@ export function markDemoBackend() {
   return setStatus('demo', '資料只存在此瀏覽器，不會寫入 PocketBase', []);
 }
 
+let lastHealthOkAt = 0;
+let probeInFlight = null;
+
 async function assertCollectionReadable(collection, { requireRead = false } = {}) {
   try {
     await pb.collection(collection).getList(1, 1, { requestKey: `health-${collection}-${requireRead ? 'auth' : 'anon'}` });
@@ -89,39 +92,66 @@ async function assertCollectionReadable(collection, { requireRead = false } = {}
  */
 export async function probePocketBase({ requireRead = false } = {}) {
   if (inDemoMode()) return markDemoBackend();
+  if (probeInFlight?.requireRead === requireRead) return probeInFlight.promise;
+  const promise = runProbe({ requireRead });
+  probeInFlight = { requireRead, promise };
+  try {
+    return await promise;
+  } finally {
+    if (probeInFlight?.promise === promise) probeInFlight = null;
+  }
+}
 
+async function runProbe({ requireRead = false } = {}) {
   const configError = getPocketBaseConfigError();
   if (configError || !pb) {
     return setStatus('failed', configError || '尚未設定 VITE_POCKETBASE_URL');
   }
 
   setStatus('checking', '正在檢查 PocketBase…');
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    const res = await fetch(`${pb.baseUrl}/api/health`, { signal: controller.signal });
-    clearTimeout(timer);
-    if (!res.ok) {
-      return setStatus('failed', `PocketBase health 回應 ${res.status}`);
-    }
-  } catch (error) {
-    const reason = error?.name === 'AbortError'
-      ? '連線逾時'
-      : pbMessage(error, error?.message || '無法連線');
+  const healthFresh = lastHealthOkAt && Date.now() - lastHealthOkAt < 10000;
+  if (!healthFresh) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(`${pb.baseUrl}/api/health`, { signal: controller.signal });
+      clearTimeout(timer);
+      if (!res.ok) {
+        lastHealthOkAt = 0;
+        return setStatus('failed', `PocketBase health 回應 ${res.status}`);
+      }
+      lastHealthOkAt = Date.now();
+    } catch (error) {
+      lastHealthOkAt = 0;
+      const reason = error?.name === 'AbortError'
+        ? '連線逾時'
+        : pbMessage(error, error?.message || '無法連線');
       logPocketBaseError('health', error, { requestUrl: `${pb.baseUrl}/api/health` });
       return setStatus('failed', `PocketBase 尚未連線：${reason}`);
+    }
   }
 
+  const checked = await Promise.allSettled(
+    REQUIRED_COLLECTIONS.map(async (name) => ({
+      name,
+      fail: await assertCollectionReadable(name, { requireRead })
+    }))
+  );
+  const failures = [];
   const ok = [];
-  for (const name of REQUIRED_COLLECTIONS) {
-    const fail = await assertCollectionReadable(name, { requireRead });
-    if (fail) {
-      return setStatus(
-        'failed',
-        `PocketBase 已回應，但${fail}。必要集合：${REQUIRED_COLLECTIONS.join('、')}`
-      );
+  for (const item of checked) {
+    if (item.status === 'rejected') {
+      failures.push(item.reason?.message || '檢查失敗');
+      continue;
     }
-    ok.push(name);
+    if (item.value.fail) failures.push(item.value.fail);
+    else ok.push(item.value.name);
+  }
+  if (failures.length) {
+    return setStatus(
+      'failed',
+      `PocketBase 已回應，但${failures[0]}。必要集合：${REQUIRED_COLLECTIONS.join('、')}`
+    );
   }
 
   return setStatus(

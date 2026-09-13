@@ -138,7 +138,7 @@ STAFF || (AUTH && (
 ### hkp_loan_records
 
 - list / view：`STAFF || borrower = @request.auth.id`
-- create：`STAFF || (AUTH && @request.body.borrower = @request.auth.id)`
+- create：`(STAFF || (AUTH && @request.body.borrower = @request.auth.id)) && @request.body.asset.availability_status = "available"`
 - update：`STAFF || (AUTH && borrower = @request.auth.id && (status = "checked_out" || status = "overdue") && @request.body.status = "returned" && @request.body.borrower:isset = false && @request.body.asset:isset = false && @request.body.loan_number:isset = false && @request.body.approved_by:isset = false && @request.body.approved_at:isset = false && @request.body.purpose:isset = false && @request.body.expected_return_at:isset = false && @request.body.checkout_at:isset = false && @request.body.property_id:isset = false && @request.body.property_name:isset = false && @request.body.borrower_name:isset = false && @request.body.borrower_number:isset = false && @request.body.borrower_department:isset = false)`
 - delete：`ADMIN`
 

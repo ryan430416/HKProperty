@@ -167,12 +167,13 @@ async function createLoan(body) {
   if (loans.length) throw new Error('此財產已有未完成的借用紀錄，不可重複借出');
   const settings = await settingsRecord();
   const pending = settings.require_loan_approval === true && !isStaff(auth);
+  const borrowerId = isStaff(auth) && trim(body.borrower_id) ? trim(body.borrower_id) : auth.id;
   const rec = await client.collection(PB.loans).create({
     loan_number: nextLoanNumber(await client.collection(PB.loans).getFullList({ fields: 'loan_number' })),
     asset: asset.id,
     property_id: asset.property_id,
     property_name: asset.name,
-    borrower: auth.id,
+    borrower: borrowerId,
     borrower_name: trim(body.borrower_name),
     borrower_number: trim(body.borrower_number),
     borrower_department: trim(body.borrower_department),
@@ -187,25 +188,32 @@ async function createLoan(body) {
     status: pending ? 'pending' : 'checked_out',
     note: trim(body.note)
   });
-  await client.collection(PB.assets).update(asset.id, {
-    availability_status: pending ? 'reserved' : 'checked_out',
-    current_loan: rec.id
-  });
-  if (!pending) {
-    await createUsageRecord(asset, {
-      loan: rec.id,
-      user_name: rec.borrower_name,
-      user_number: rec.borrower_number,
-      department: rec.borrower_department,
-      used_at: checkoutAt,
-      purpose: rec.purpose,
-      note: `借用編號 ${rec.loan_number}`
+  try {
+    await client.collection(PB.assets).update(asset.id, {
+      availability_status: pending ? 'reserved' : 'checked_out',
+      current_loan: rec.id
     });
-    await syncUsageCount(asset.id);
-    await logOp('借出', 'loan', rec.id, asset.id, { loan_number: rec.loan_number });
-  } else {
-    await logOp('借用申請', 'loan', rec.id, asset.id, { loan_number: rec.loan_number });
+    if (!pending) {
+      await createUsageRecord(asset, {
+        loan: rec.id,
+        user_name: rec.borrower_name,
+        user_number: rec.borrower_number,
+        department: rec.borrower_department,
+        used_at: checkoutAt,
+        purpose: rec.purpose,
+        note: `借用編號 ${rec.loan_number}`
+      });
+      await syncUsageCount(asset.id);
+    }
+  } catch (error) {
+    await client.collection(PB.loans).update(rec.id, { status: 'cancelled', note: '寫入未完成，已取消' }).catch(() => {});
+    await client.collection(PB.assets).update(asset.id, {
+      availability_status: avail,
+      current_loan: asset.current_loan || null
+    }).catch(() => {});
+    throw error;
   }
+  await logOp(pending ? '借用申請' : '借出', 'loan', rec.id, asset.id, { loan_number: rec.loan_number });
   return rec;
 }
 
@@ -320,11 +328,13 @@ async function createReservation(body) {
     throw new Error('此時段已有其他待審或已核准的預約');
   }
   const day = nowIso().slice(0, 10).replace(/-/g, '');
-  const rec = await client.collection(PB.reservations).create({
+  const payload = {
     reservation_number: `RSV-${day}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
     asset: asset.id,
     user: auth.id,
     user_name: displayName(auth),
+    user_number: auth.school_number || '',
+    department: auth.department || '',
     property_id: asset.property_id,
     property_name: asset.name,
     purpose: trim(body.purpose),
@@ -333,7 +343,26 @@ async function createReservation(body) {
     status: 'pending',
     contact: trim(body.contact),
     note: trim(body.note)
-  });
+  };
+  const optional = ['user_number', 'department'];
+  let rec;
+  let lastError;
+  for (let attempt = 0; attempt < optional.length + 1; attempt += 1) {
+    try {
+      rec = await client.collection(PB.reservations).create(payload);
+      break;
+    } catch (error) {
+      lastError = error;
+      const fields = Object.keys(error?.data?.data || {});
+      const unknown = fields.find((field) => optional.includes(field));
+      if ((error?.status === 400 || error?.data?.code === 400) && unknown) {
+        delete payload[unknown];
+        continue;
+      }
+      throw error;
+    }
+  }
+  if (!rec) throw lastError;
   await logOp('預約申請', 'reservation', rec.id, asset.id, { reservation_number: rec.reservation_number });
   return rec;
 }
@@ -354,6 +383,36 @@ async function approveReservation(id) {
     approved_at: nowIso()
   });
   return updated;
+}
+
+async function checkoutReservation(id, body = {}) {
+  const client = requireClient();
+  const auth = authRecord();
+  const rec = await client.collection(PB.reservations).getOne(id);
+  if (rec.status === 'converted' || rec.converted_loan) throw new Error('此預借已轉成借出，不可重複辦理');
+  if (rec.status !== 'approved') throw new Error('僅已核准的預約可辦理借出');
+  if (!isStaff(auth) && relationId(rec.user) !== auth.id) throw new Error('只能辦理自己的預約借出');
+  const asset = await requireAsset(relationId(rec.asset));
+  const number = trim(rec.user_number || body.borrower_number || auth.school_number);
+  if (number.length < 4) throw new Error('找不到借用人的學號或教職員編號，無法轉成借出');
+  const loan = await createLoan({
+    asset_id: asset.id,
+    borrower_id: relationId(rec.user),
+    borrower_name: rec.user_name || displayName(auth),
+    borrower_number: number,
+    borrower_department: trim(rec.department || body.borrower_department || auth.department) || '未填單位',
+    purpose: rec.purpose,
+    expected_return_at: body.expected_return_at || rec.end_at,
+    checkout_method: 'reservation',
+    contact: rec.contact,
+    note: trim(body.note) || trim(rec.note)
+  });
+  const updated = await client.collection(PB.reservations).update(id, {
+    status: 'converted',
+    converted_loan: loan.id
+  });
+  await logOp('預約轉借出', 'reservation', rec.id, asset.id, { loan_number: loan.loan_number });
+  return { ...updated, loan };
 }
 
 async function rejectReservation(id, reason) {
@@ -387,7 +446,7 @@ async function runHkpDirect(path, body = {}) {
   }
   if (path === '/api/hkproperty/usage') path = '/api/hkp/usage';
   if (path === '/api/hkproperty/reservations') path = '/api/hkp/reservations';
-  const propRsv = path.match(/^\/api\/hkproperty\/reservations\/([^/]+)\/(approve|reject|cancel)$/);
+  const propRsv = path.match(/^\/api\/hkproperty\/reservations\/([^/]+)\/(approve|reject|cancel|checkout)$/);
   if (propRsv) path = `/api/hkp/reservations/${propRsv[1]}/${propRsv[2]}`;
   if (path === '/api/hkproperty/audits') path = '/api/hkp/audits';
   if (path === '/api/hkproperty/settings') path = '/api/hkp/settings';
@@ -438,6 +497,7 @@ async function runHkpDirect(path, body = {}) {
       note: body.note
     });
     const counted = await syncUsageCount(asset.id);
+    await logOp('現場使用', 'usage', rec.id, asset.id, { property_id: asset.property_id });
     return { ...rec, usage_count: counted };
   }
   if (path === '/api/hkp/audits') {
@@ -486,11 +546,12 @@ async function runHkpDirect(path, body = {}) {
     return updated;
   }
   if (path === '/api/hkp/reservations') return createReservation(body);
-  const rsvMut = path.match(/^\/api\/hkp\/reservations\/([^/]+)\/(approve|reject|cancel)$/);
+  const rsvMut = path.match(/^\/api\/hkp\/reservations\/([^/]+)\/(approve|reject|cancel|checkout)$/);
   if (rsvMut) {
     const [, id, action] = rsvMut;
     if (action === 'approve') return approveReservation(id);
     if (action === 'reject') return rejectReservation(id, body.reason);
+    if (action === 'checkout') return checkoutReservation(id, body);
     return cancelReservation(id);
   }
   if (path === '/api/hkp/settings') {

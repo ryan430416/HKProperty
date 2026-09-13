@@ -77,6 +77,7 @@ import {
 import {
   approveReservation,
   cancelReservation,
+  checkoutReservation,
   createReservation,
   listManageReservations,
   listMyReservations,
@@ -886,12 +887,15 @@ function reservationCardHTML(row, { manage = false } = {}) {
       <div>用途：${esc(row.purpose)}${row.userName ? ` · ${esc(row.userName)}` : ''}</div>
       ${row.rejectionReason ? `<div class="muted">拒絕原因：${esc(row.rejectionReason)}</div>` : ''}
       <div class="card-actions">
-        ${mine && ['pending', 'approved'].includes(row.status)
+        ${mine && row.status === 'pending'
           ? `<button type="button" class="secondary" data-cancel-reservation="${esc(row.recordId)}">取消預借</button>`
           : ''}
         ${manage && row.status === 'pending'
           ? `<button type="button" class="primary" data-approve-reservation="${esc(row.recordId)}">核准</button>
              <button type="button" class="danger" data-reject-reservation="${esc(row.recordId)}">拒絕</button>`
+          : ''}
+        ${manage && row.status === 'approved'
+          ? `<button type="button" class="primary" data-checkout-reservation="${esc(row.recordId)}">轉為借出</button>`
           : ''}
         <button type="button" class="link-btn" data-open-item="${esc(row.propertyId)}">查看財產</button>
       </div>
@@ -1349,6 +1353,24 @@ function bindEvents() {
         .catch((error) => toast(error.message || '核准失敗', 'error'));
       return;
     }
+    const checkoutRsv = event.target.closest('[data-checkout-reservation]');
+    if (checkoutRsv) {
+      if (checkoutRsv.disabled) return;
+      checkoutRsv.disabled = true;
+      checkoutRsv.textContent = '處理中';
+      checkoutReservation(checkoutRsv.dataset.checkoutReservation)
+        .then(async () => {
+          await refreshData();
+          render();
+          toast('已轉為借出，使用次數加 1');
+        })
+        .catch((error) => toast(error.message || '轉為借出失敗', 'error'))
+        .finally(() => {
+          checkoutRsv.disabled = false;
+          checkoutRsv.textContent = '轉為借出';
+        });
+      return;
+    }
     const rejectRsv = event.target.closest('[data-reject-reservation]');
     if (rejectRsv) {
       const reason = window.prompt('請輸入拒絕原因');
@@ -1521,7 +1543,11 @@ function bindEvents() {
   $('checkoutConfirmForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     const btn = event.submitter || $('checkoutConfirmForm').querySelector('button[type="submit"]');
-    if (btn) btn.disabled = true;
+    if (btn?.disabled) return;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '處理中';
+    }
     try {
       if (!state.pendingCheckout) throw new Error('找不到待確認的借出資料');
       const { item } = await checkout({
@@ -1535,14 +1561,21 @@ function bindEvents() {
     } catch (error) {
       toast(error.message || '借出失敗', 'error');
     } finally {
-      if (btn) btn.disabled = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '確認借出';
+      }
     }
   });
 
   $('checkinForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     const btn = event.submitter || $('checkinForm').querySelector('button[type="submit"]');
-    if (btn) btn.disabled = true;
+    if (btn?.disabled) return;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '處理中';
+    }
     try {
       const result = document.querySelector('input[name="checkinResult"]:checked')?.value;
       const outcome = await checkin({
@@ -1564,7 +1597,10 @@ function bindEvents() {
     } catch (error) {
       toast(error.message || '歸還失敗', 'error');
     } finally {
-      if (btn) btn.disabled = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '確認歸還';
+      }
     }
   });
 
@@ -1742,7 +1778,11 @@ function bindEvents() {
   $('reservationForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     const btn = event.submitter;
-    if (btn) btn.disabled = true;
+    if (btn?.disabled) return;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '處理中';
+    }
     try {
       await createReservation({
         propertyId: $('reservationPropertyId').value,
@@ -1760,7 +1800,10 @@ function bindEvents() {
     } catch (error) {
       toast(error.message || '預借失敗', 'error');
     } finally {
-      if (btn) btn.disabled = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '送出預借申請';
+      }
     }
   });
 
