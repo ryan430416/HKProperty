@@ -238,7 +238,8 @@ export async function createStaffAccount({ email, password, name, employeeNumber
       department: String(department || '').trim(),
       phone: String(phone || '').trim(),
       active: true,
-      is_active: true
+      is_active: true,
+      ...(getProfile()?.id ? { created_by: getProfile().id } : {})
     });
     return mapProfile(row);
   } catch (error) {

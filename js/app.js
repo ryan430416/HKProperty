@@ -75,7 +75,7 @@ import {
   updateMyProfile
 } from '../services/authService.js';
 import { PB } from '../pocketbase/schema.mjs';
-import { confirmCheckout, confirmReturn, listDesk, revealPhone, reviewReservation } from '../services/publicBorrow.js';
+import { confirmBorrowReturn, confirmCheckout, confirmReturn, listDesk, revealPhone, reviewReservation } from '../services/publicBorrow.js';
 import { maskPhone } from '../services/privacy.js';
 import { bindPublicPortal, hidePublicPortal, openPortalFromScan, showPublicPortal } from './publicPortal.js';
 import {
@@ -323,7 +323,7 @@ function setView(view) {
   }
   const next = allowedView(view);
   if (!next) {
-    if (getProfile()) toast('沒有權限使用此頁面', 'error');
+    if (getProfile()) toast('403 沒有權限，已返回借用管理', 'error');
     view = isStaff() ? 'staffDesk' : 'dashboard';
   } else {
     view = next;
@@ -756,10 +756,11 @@ async function renderStaffDesk() {
         <strong>${esc(row.number || row.id)} · ${esc(row.assetName || '財產')} ${esc(row.propertyId || '')}</strong>
         <div>${esc(row.unit)} ${esc(row.name)} · ${esc(row.phoneMasked)} · ${esc(row.status)}${overdue ? ' · 已逾期' : ''}</div>
         <div class="portal-actions">
-          <button type="button" data-reveal="${esc(row.id)}" data-collection="${state.deskKind === 'reservation' ? PB.reservationsV2 : state.deskKind === 'return' ? PB.returnRequests : PB.borrowRequests}">查看電話</button>
+          <button type="button" data-reveal="${esc(row.revealId || row.id)}" data-collection="${esc(row.collectionName || (state.deskKind === 'reservation' ? PB.reservationsV2 : state.deskKind === 'return' ? PB.returnRequests : PB.borrowRequests))}">查看電話</button>
           ${row.status === 'pending' && state.deskKind === 'reservation' ? `<button type="button" data-approve-res="${esc(row.id)}">核准</button><button type="button" data-reject-res="${esc(row.id)}">拒絕</button>` : ''}
           ${row.status === 'pending' && state.deskKind !== 'reservation' && state.deskKind !== 'return' ? `<button type="button" data-confirm-out="${esc(row.id)}">確認借出</button>` : ''}
           ${state.deskKind === 'return' && row.status === 'pending' ? `<button type="button" data-confirm-return="${esc(row.id)}">確認歸還</button>` : ''}
+          ${state.deskKind === 'borrow' && row.status === 'return_pending' ? `<button type="button" data-confirm-borrow-return="${esc(row.id)}">確認歸還</button>` : ''}
         </div>
       </article>`;
     }).join('') : '<div class="empty">目前沒有待處理項目</div>';
@@ -1909,6 +1910,7 @@ function bindEvents() {
     const approve = event.target.closest('[data-approve-res]');
     const reject = event.target.closest('[data-reject-res]');
     const ret = event.target.closest('[data-confirm-return]');
+    const borrowReturn = event.target.closest('[data-confirm-borrow-return]');
     const reveal = event.target.closest('[data-reveal]');
     const reset = event.target.closest('[data-reset-user]');
     try {
@@ -1916,6 +1918,7 @@ function bindEvents() {
       else if (approve) await reviewReservation(approve.dataset.approveRes, 'approve');
       else if (reject) await reviewReservation(reject.dataset.rejectRes, 'reject');
       else if (ret) await confirmReturn(ret.dataset.confirmReturn);
+      else if (borrowReturn) await confirmBorrowReturn(borrowReturn.dataset.confirmBorrowReturn);
       else if (reveal) {
         const phone = await revealPhone(reveal.dataset.collection, reveal.dataset.reveal);
         toast(maskPhone(phone) ? `電話 ${phone}` : '沒有電話');
@@ -1928,7 +1931,7 @@ function bindEvents() {
       toast('已更新');
       renderStaffDesk();
     } catch (error) {
-      if (out || approve || reject || ret || reveal || reset) toast(error.message || '操作失敗', 'error');
+      if (out || approve || reject || ret || borrowReturn || reveal || reset) toast(error.message || '操作失敗', 'error');
     }
   });
   $('staffCreateForm')?.addEventListener('submit', async (event) => {

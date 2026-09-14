@@ -250,7 +250,7 @@ STAFF || (AUTH && (
 
 借用人不能把自己的預借改成 `approved`。這次實測自行核准被拒絕（PocketBase 對不允許的 update 回 404，紀錄仍是 pending）。
 
-時段重疊無法寫進 API Rule。正式送出前會查 `hkp_reservation_slots`（只含財產、起迄、狀態，不含借用人），有 `pending` 或 `approved` 重疊就拒絕。沒有 `pb_hooks` 的情況下，繞過前端的人仍可能直接 POST 重疊預約；這點規則擋不住。
+時段重疊不能靠單一筆的開始、結束時間做唯一索引。公開預借改寫 `hkp_time_locks`，同一財產的同一小時不可重複；取消或拒絕會把時段改成已釋放，已借出的財產也不能再建立借用申請。舊的 `hkp_reservations_v2` 在新版前端部署前仍接受建立，所以直接打那條舊 API 的重疊還沒關。頻率限制仍要主機上的 Hook。
 
 ### hkp_usage_records
 
@@ -343,5 +343,5 @@ http://localhost:5173
 
 - 正式登入用 `hkp-admin@hkproperty.local`、`hkp-staff@hkproperty.local`、`hkp-borrower@hkproperty.local`（密碼在 `.env.local` 的 `HKP_FORMAL_PASSWORD`），不要用本機 PocketBase 的 superuser。
 - 不要對 `hkp_assets` 執行匯入覆寫。
-- 預借時段重疊靠前端查 `hkp_reservation_slots`。共用庫沒有 hook，直接打 API 仍可能寫入重疊預約。
+- 新版預借寫 `hkp_time_locks`，同一小時重複會被資料庫拒絕。舊集合 `hkp_reservations_v2` 在前端部署前仍可直接建立。頻率限制要等 `pb_hooks/public_borrow.pb.js` 放到主機並重啟。
 - 這輪畫面修正尚未部署到 Vercel 前，線上站不會出現新的登出同步與錯誤文字。

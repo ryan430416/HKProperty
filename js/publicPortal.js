@@ -113,7 +113,7 @@ function openForm(next) {
   $('portalReserveFields').hidden = !reserve;
   $('portalBorrowFields').hidden = !borrow;
   $('portalReturnFields').hidden = !returning;
-  $('portalUnitWrap').hidden = returning;
+  $('portalUnitWrap').hidden = next === 'lookup';
   $('portalPrivacyWrap').hidden = returning;
   if ($('portalReturnCondition')) $('portalReturnCondition').closest('.field').hidden = next !== 'return';
   if (selected && !returning) {
@@ -198,13 +198,11 @@ export function bindPublicPortal(onStaffLogin) {
         showMessage(`申請 ${data.requestNumber} 狀態：${data.status}。電話 ${data.phoneMasked || ''}`);
       } else {
         await submitReturn({
+          ...common,
           requestNumber: $('portalRequestNumber').value,
           token: $('portalToken').value,
-          name: common.name,
-          phone: common.phone,
           propertyId: $('portalReturnProperty').value,
-          condition: $('portalReturnCondition').value,
-          notes: common.notes
+          condition: $('portalReturnCondition').value
         });
         showMessage('歸還申請已送出，請等待經辦人員確認。', 'ok');
         $('portalForm').reset();

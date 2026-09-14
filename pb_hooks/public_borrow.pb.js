@@ -2,6 +2,8 @@
 /**
  * Anonymous borrow/reserve/return routes.
  * Install on the PocketBase server at pb_hooks/public_borrow.pb.js and restart.
+ * db.keson.pro does not load this file from GitHub or Vercel.
+ * Overlap is also enforced by the hkp_time_locks unique index; this route must write those rows.
  * Does not store plaintext tokens or write full phone numbers into logs.
  */
 
@@ -115,13 +117,36 @@ routerAdd('POST', '/api/hkp/public/borrow', function (e) {
   return e.json(200, { requestNumber: number });
 });
 
+function hourSlots(startAt, endAt) {
+  var start = new Date(startAt).getTime();
+  var end = new Date(endAt).getTime();
+  var hour = 60 * 60 * 1000;
+  if (!start || !end || end <= start || start <= Date.now() || end - start > 7 * 24 * hour) {
+    throw new BadRequestError('預借時段不正確');
+  }
+  var slots = [];
+  var cursor = Math.floor(start / hour) * hour;
+  while (cursor < end) {
+    slots.push(new Date(cursor).toISOString());
+    cursor += hour;
+    if (slots.length > 168) throw new BadRequestError('預借時段過長');
+  }
+  return slots;
+}
+
+function releaseLocks(rows) {
+  for (var i = 0; i < rows.length; i++) {
+    rows[i].set('status', 'cancelled');
+    rows[i].set('slot_start', 'released:' + rows[i].id);
+    $app.save(rows[i]);
+  }
+}
+
 routerAdd('POST', '/api/hkp/public/reserve', function (e) {
   if (tooMany(e)) throw new BadRequestError(VERIFY_FAIL);
   var body = publicBody(e);
   if (!body.privacyAck) throw new BadRequestError('請先勾選個資使用告知');
-  var start = new Date(body.startAt).getTime();
-  var end = new Date(body.endAt).getTime();
-  if (!start || !end || end <= start || start <= Date.now()) throw new BadRequestError('預借時段不正確');
+  var slots = hourSlots(body.startAt, body.endAt);
   var overlap = $app.findRecordsByFilter(
     'hkp_reservations_v2',
     'asset = {:asset} && (status = "pending" || status = "approved") && start_at < {:end} && end_at > {:start}',
@@ -131,22 +156,33 @@ routerAdd('POST', '/api/hkp/public/reserve', function (e) {
     { asset: body.assetId, start: body.startAt, end: body.endAt }
   );
   if (overlap.length) throw new BadRequestError('此時段與其他有效預借重疊');
-  var col = $app.findCollectionByNameOrId('hkp_reservations_v2');
-  var rec = new Record(col);
+  var col = $app.findCollectionByNameOrId('hkp_time_locks');
   var number = requestNumber('RV');
-  rec.set('reservation_number', number);
-  rec.set('borrower_unit', clean(body.unit));
-  rec.set('borrower_name', clean(body.name));
-  rec.set('borrower_phone', phoneOf(body.phone));
-  rec.set('asset', body.assetId);
-  rec.set('start_at', body.startAt);
-  rec.set('end_at', body.endAt);
-  rec.set('purpose', clean(body.purpose));
-  rec.set('status', 'pending');
-  rec.set('public_token_hash', tokenHash(body.token));
-  rec.set('notes', clean(body.notes));
-  rec.set('privacy_ack', true);
-  $app.save(rec);
+  var created = [];
+  try {
+    for (var i = 0; i < slots.length; i++) {
+      var rec = new Record(col);
+      rec.set('reservation_number', number);
+      rec.set('asset', body.assetId);
+      rec.set('slot_start', slots[i]);
+      rec.set('start_at', body.startAt);
+      rec.set('end_at', body.endAt);
+      rec.set('borrower_unit', clean(body.unit));
+      rec.set('borrower_name', clean(body.name));
+      rec.set('borrower_name_hash', tokenHash(clean(body.name)));
+      rec.set('borrower_phone', phoneOf(body.phone));
+      rec.set('purpose', clean(body.purpose));
+      rec.set('notes', clean(body.notes));
+      rec.set('status', 'pending');
+      rec.set('public_token_hash', tokenHash(body.token));
+      rec.set('privacy_ack', true);
+      $app.save(rec);
+      created.push(rec);
+    }
+  } catch (err) {
+    releaseLocks(created);
+    throw new BadRequestError('此時段與其他有效預借重疊');
+  }
   return e.json(200, { requestNumber: number });
 });
 
@@ -171,13 +207,19 @@ routerAdd('POST', '/api/hkp/public/lookup', function (e) {
 routerAdd('POST', '/api/hkp/public/cancel', function (e) {
   if (tooMany(e)) throw new BadRequestError(VERIFY_FAIL);
   var body = publicBody(e);
-  var rec = findByNumber('hkp_reservations_v2', 'reservation_number', clean(body.requestNumber));
-  if (!rec || !identityMatches(rec, body.name, body.phone, body.token) || rec.get('status') !== 'pending') {
+  var number = clean(body.requestNumber);
+  var locks = $app.findRecordsByFilter('hkp_time_locks', 'reservation_number = {:n} && status = "pending"', '', 200, 0, { n: number });
+  var legacy = findByNumber('hkp_reservations_v2', 'reservation_number', number);
+  var sample = locks.length ? locks[0] : legacy;
+  if (!sample || !identityMatches(sample, body.name, body.phone, body.token) || sample.get('status') !== 'pending') {
     noteFail(e);
     throw new BadRequestError(VERIFY_FAIL);
   }
-  rec.set('status', 'cancelled');
-  $app.save(rec);
+  if (locks.length) releaseLocks(locks);
+  if (legacy && legacy.get('status') === 'pending') {
+    legacy.set('status', 'cancelled');
+    $app.save(legacy);
+  }
   return e.json(200, { ok: true });
 });
 

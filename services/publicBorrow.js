@@ -93,12 +93,40 @@ async function activeLoanExists(assetId) {
   return rows.totalItems > 0;
 }
 
+const HOUR_MS = 60 * 60 * 1000;
+const MAX_RESERVATION_MS = 7 * 24 * HOUR_MS;
+
+function hourSlots(startAt, endAt) {
+  const start = new Date(startAt).getTime();
+  const end = new Date(endAt).getTime();
+  if (!start || !end || end <= start) throw new Error('結束時間必須晚於開始時間');
+  if (end - start > MAX_RESERVATION_MS) throw new Error('預借最長 7 天');
+  const slots = [];
+  for (let cursor = Math.floor(start / HOUR_MS) * HOUR_MS; cursor < end; cursor += HOUR_MS) {
+    slots.push(new Date(cursor).toISOString());
+    if (slots.length > 168) throw new Error('預借時段過長');
+  }
+  if (!slots.length) throw new Error('請選擇預借時段');
+  return slots;
+}
+
+function isUniqueError(error) {
+  const fields = error?.data?.data || error?.response?.data || {};
+  return Object.values(fields).some((item) => item?.code === 'validation_not_unique');
+}
+
 async function reservationConflict(assetId, startAt, endAt) {
   const client = requireClient();
+  const slots = new Set(hourSlots(startAt, endAt));
+  const locks = await client.collection(PB.lockPublic).getFullList({
+    filter: `asset = "${assetId}" && (status = "pending" || status = "approved")`,
+    fields: 'id,slot_start,status'
+  }).catch(() => []);
+  if ((locks || []).some((row) => slots.has(row.slot_start))) return true;
   const rows = await client.collection(PB.reservationPublic).getFullList({
     filter: `asset = "${assetId}" && (status = "pending" || status = "approved")`,
     fields: 'id,start_at,end_at,status'
-  });
+  }).catch(() => []);
   const start = new Date(startAt).getTime();
   const end = new Date(endAt).getTime();
   return (rows || []).some((row) => start < new Date(row.end_at).getTime() && end > new Date(row.start_at).getTime());
@@ -133,22 +161,31 @@ export async function submitBorrow(input) {
   if (routed.status && routed.status !== 404) throw new Error(routed.data?.message || HOOK_MISSING);
 
   const client = requireClient();
-  const record = await client.collection(PB.borrowRequests).create({
-    request_number: createRequestNumber('BR'),
-    borrower_unit: payload.unit,
-    borrower_name: payload.name,
-    borrower_phone: payload.phone,
-    asset: payload.assetId,
-    purpose: payload.purpose,
-    requested_at: new Date().toISOString(),
-    expected_return_at: payload.expectedReturnAt,
-    status: 'pending',
-    public_token_hash: await hashToken(token),
-    notes: payload.notes,
-    checkout_condition: payload.condition,
-    privacy_ack: true
-  });
-  return { requestNumber: record.request_number, token, via: 'rule' };
+  try {
+    const record = await client.collection(PB.borrowRequests).create({
+      request_number: createRequestNumber('BR'),
+      borrower_unit: payload.unit,
+      borrower_name: payload.name,
+      borrower_phone: payload.phone,
+      asset: payload.assetId,
+      purpose: payload.purpose,
+      requested_at: new Date().toISOString(),
+      expected_return_at: payload.expectedReturnAt,
+      status: 'pending',
+      public_token_hash: await hashToken(token),
+      borrower_name_hash: await hashToken(payload.name),
+      notes: payload.notes,
+      checkout_condition: payload.condition,
+      privacy_ack: true
+    });
+    return { requestNumber: record.request_number, token, via: 'rule' };
+  } catch (error) {
+    const guest = await client.collection(PB.assetsGuest).getOne(payload.assetId, { fields: 'id,availability_status' }).catch(() => null);
+    if (guest?.availability_status && guest.availability_status !== 'available') {
+      throw new Error('此財產目前已借出或待歸還，無法再送出借用');
+    }
+    throw new Error(pbMessage(error, '借用送出失敗'));
+  }
 }
 
 export async function submitReservation(input) {
@@ -161,6 +198,7 @@ export async function submitReservation(input) {
   if (!input.privacyAck) throw new Error('請先勾選個資使用告知');
   if (await reservationConflict(input.assetId, input.startAt, input.endAt)) throw new Error('此時段與其他有效預借重疊');
 
+  const slots = hourSlots(input.startAt, input.endAt);
   const token = createPublicToken();
   const payload = {
     assetId: input.assetId,
@@ -174,28 +212,88 @@ export async function submitReservation(input) {
     token,
     privacyAck: true
   };
-  const routed = await postPublic('/api/hkp/public/reserve', payload);
-  if (routed.status === 200 && routed.data?.requestNumber) {
-    return { requestNumber: routed.data.requestNumber, token, via: 'route' };
-  }
-  if (routed.status && routed.status !== 404) throw new Error(routed.data?.message || HOOK_MISSING);
-
   const client = requireClient();
-  const record = await client.collection(PB.reservationsV2).create({
-    reservation_number: createRequestNumber('RV'),
-    borrower_unit: payload.unit,
-    borrower_name: payload.name,
-    borrower_phone: payload.phone,
-    asset: payload.assetId,
-    start_at: payload.startAt,
-    end_at: payload.endAt,
-    purpose: payload.purpose,
-    status: 'pending',
-    public_token_hash: await hashToken(token),
-    notes: payload.notes,
-    privacy_ack: true
+  const number = createRequestNumber('RV');
+  const tokenHash = await hashToken(token);
+  const nameHash = await hashToken(payload.name);
+  const created = [];
+  try {
+    for (const slot of slots) {
+      const row = await client.collection(PB.timeLocks).create({
+        reservation_number: number,
+        asset: payload.assetId,
+        slot_start: slot,
+        start_at: payload.startAt,
+        end_at: payload.endAt,
+        borrower_unit: payload.unit,
+        borrower_name: payload.name,
+        borrower_name_hash: nameHash,
+        borrower_phone: payload.phone,
+        purpose: payload.purpose,
+        notes: payload.notes,
+        status: 'pending',
+        public_token_hash: tokenHash,
+        privacy_ack: true
+      });
+      created.push(row);
+    }
+  } catch (error) {
+    if (created.length) {
+      await Promise.all(created.map((row) => client.collection(PB.timeLocks).update(row.id, {
+        status: 'cancelled',
+        slot_start: `released:${row.id}`
+      }, {
+        headers: {
+          'x-hkp-token': tokenHash,
+          'x-hkp-name': nameHash,
+          'x-hkp-phone': payload.phone
+        }
+      }).catch(() => {})));
+    }
+    if (isUniqueError(error)) throw new Error('此時段與其他有效預借重疊');
+    throw new Error(pbMessage(error, '預借送出失敗'));
+  }
+  return { requestNumber: number, token, via: 'lock' };
+}
+
+function verifyHeaders(input) {
+  return Promise.all([hashToken(input.token), hashToken(collapse(input.name))]).then(([tokenHash, nameHash]) => ({
+    headers: {
+      'x-hkp-token': tokenHash,
+      'x-hkp-name': nameHash,
+      'x-hkp-phone': normalizePhone(input.phone)
+    }
+  }));
+}
+
+async function findVerifiedBorrow(input) {
+  const client = requireClient();
+  const { headers } = await verifyHeaders(input);
+  const rows = await client.collection(PB.borrowVerify).getList(1, 1, {
+    filter: `request_number = "${collapse(input.requestNumber)}"`,
+    fields: 'id,request_number,status,asset',
+    headers
   });
-  return { requestNumber: record.reservation_number, token, via: 'rule' };
+  const row = rows.items?.[0];
+  if (!row) throw identityError();
+  if (collapse(input.propertyId)) {
+    const asset = await client.collection(PB.assetsGuest).getOne(row.asset, { fields: 'id,property_id' }).catch(() => null);
+    if (!asset || String(asset.property_id) !== collapse(input.propertyId)) throw identityError();
+  }
+  return { row, headers };
+}
+
+async function findVerifiedLocks(input) {
+  const client = requireClient();
+  const { headers } = await verifyHeaders(input);
+  const rows = await client.collection(PB.lockVerify).getList(1, 1, {
+    filter: `reservation_number = "${collapse(input.requestNumber)}"`,
+    fields: 'id,reservation_number,status',
+    headers
+  });
+  const row = rows.items?.[0];
+  if (!row) throw identityError();
+  return { row, headers };
 }
 
 export async function lookupBorrow(input) {
@@ -208,13 +306,32 @@ export async function lookupBorrow(input) {
     phone: normalizePhone(input.phone)
   });
   if (routed.status === 200 && routed.data?.requestNumber) return routed.data;
-  if (routed.status === 404) throw new Error(HOOK_MISSING);
-  throw identityError();
+  if (routed.status && routed.status !== 404) throw identityError();
+  try {
+    const { row } = await findVerifiedBorrow(input);
+    return {
+      requestNumber: row.request_number,
+      status: row.status,
+      phoneMasked: maskPhone(input.phone)
+    };
+  } catch (error) {
+    try {
+      const { row } = await findVerifiedLocks(input);
+      return {
+        requestNumber: row.reservation_number,
+        status: row.status,
+        phoneMasked: maskPhone(input.phone)
+      };
+    } catch (lockError) {
+      if (error?.code === 'verify_failed' || lockError?.code === 'verify_failed') throw identityError();
+      throw identityError();
+    }
+  }
 }
 
 export async function submitReturn(input) {
-  if (!collapse(input.requestNumber) || !collapse(input.token)) throw identityError();
-  assertPerson({ ...input, requireUnit: false });
+  if (!collapse(input.requestNumber) || !collapse(input.token) || !collapse(input.propertyId)) throw identityError();
+  assertPerson(input);
   if (!collapse(input.condition)) throw new Error('請填寫物品歸還狀況');
   const routed = await postPublic('/api/hkp/public/return', {
     requestNumber: collapse(input.requestNumber),
@@ -226,8 +343,16 @@ export async function submitReturn(input) {
     notes: collapse(input.notes)
   });
   if (routed.status === 200) return routed.data || { ok: true };
-  if (routed.status === 404) throw new Error(HOOK_MISSING);
-  throw identityError();
+  if (routed.status && routed.status !== 404) throw identityError();
+  try {
+    const { row, headers } = await findVerifiedBorrow(input);
+    if (row.status !== 'borrowed') throw identityError();
+    await requireClient().collection(PB.borrowRequests).update(row.id, { status: 'return_pending' }, { headers });
+    return { ok: true };
+  } catch (error) {
+    if (error?.code === 'verify_failed') throw error;
+    throw identityError();
+  }
 }
 
 export async function cancelReservation(input) {
@@ -240,8 +365,27 @@ export async function cancelReservation(input) {
     phone: normalizePhone(input.phone)
   });
   if (routed.status === 200) return { ok: true };
-  if (routed.status === 404) throw new Error(HOOK_MISSING);
-  throw identityError();
+  if (routed.status && routed.status !== 404) throw identityError();
+  try {
+    const client = requireClient();
+    const { headers } = await verifyHeaders(input);
+    const rows = await client.collection(PB.lockVerify).getFullList({
+      filter: `reservation_number = "${collapse(input.requestNumber)}" && status = "pending"`,
+      fields: 'id,reservation_number,status',
+      headers
+    });
+    if (!rows.length) throw identityError();
+    for (const row of rows) {
+      await client.collection(PB.timeLocks).update(row.id, {
+        status: 'cancelled',
+        slot_start: `released:${row.id}`
+      }, { headers });
+    }
+    return { ok: true };
+  } catch (error) {
+    if (error?.code === 'verify_failed') throw error;
+    throw identityError();
+  }
 }
 
 function requireDesk() {
@@ -266,18 +410,48 @@ function maskRow(row) {
   };
 }
 
+function deskOptions(status) {
+  const options = { sort: '-created', expand: 'asset' };
+  if (status) options.filter = `status = "${status}"`;
+  return options;
+}
+
+async function listReservationDesk(status) {
+  const client = requireClient();
+  const locks = await client.collection(PB.timeLocks).getFullList(deskOptions(status));
+  const groups = new Map();
+  for (const row of locks) {
+    if (groups.has(row.reservation_number)) continue;
+    groups.set(row.reservation_number, {
+      ...maskRow(row),
+      id: row.reservation_number,
+      revealId: row.id,
+      collectionName: PB.timeLocks,
+      assetName: row.expand?.asset?.name || '',
+      propertyId: row.expand?.asset?.property_id || ''
+    });
+  }
+  const legacy = await client.collection(PB.reservationsV2).getFullList(deskOptions(status)).catch(() => []);
+  const older = (legacy || []).filter((row) => !groups.has(row.reservation_number)).map((row) => ({
+    ...maskRow(row),
+    revealId: row.id,
+    collectionName: PB.reservationsV2,
+    assetName: row.expand?.asset?.name || '',
+    propertyId: row.expand?.asset?.property_id || ''
+  }));
+  return [...groups.values(), ...older];
+}
+
 export async function listDesk(kind, status) {
   requireDesk();
+  if (kind === 'reservation') return listReservationDesk(status);
   const client = requireClient();
-  const collection = kind === 'reservation' ? PB.reservationsV2 : kind === 'return' ? PB.returnRequests : PB.borrowRequests;
-  const filter = status ? `status = "${status}"` : '';
-  const rows = await client.collection(collection).getFullList({
-    filter,
-    sort: '-created',
-    expand: 'asset'
-  });
+  const collection = kind === 'return' ? PB.returnRequests : PB.borrowRequests;
+  const rows = await client.collection(collection).getFullList(deskOptions(status));
   return rows.map((row) => ({
     ...maskRow(row),
+    revealId: row.id,
+    collectionName: collection,
     assetName: row.expand?.asset?.name || '',
     propertyId: row.expand?.asset?.property_id || ''
   }));
@@ -317,9 +491,18 @@ async function writeUsage(asset, extra) {
   return client.collection(PB.usage).create(payload);
 }
 
+const deskBusy = new Set();
+
+function lockDesk(id) {
+  if (deskBusy.has(id)) throw new Error('處理中，請勿重複送出');
+  deskBusy.add(id);
+}
+
 export async function confirmCheckout(id) {
   requireDesk();
+  lockDesk(id);
   const client = requireClient();
+  try {
   const routed = await client.send(`/api/hkp/staff/borrow-confirm`, { method: 'POST', body: { id } }).catch((error) => error);
   if (routed && routed.requestNumber) return routed;
   const row = await client.collection(PB.borrowRequests).getOne(id, { expand: 'asset' });
@@ -327,6 +510,8 @@ export async function confirmCheckout(id) {
   const asset = row.expand?.asset;
   if (!asset?.id) throw new Error('找不到財產');
   if (await activeLoanExists(asset.id)) throw new Error('同一財產不可同時借給兩人');
+  const already = await client.collection(PB.borrowRecords).getList(1, 1, { filter: `borrow_request = "${id}"` });
+  if (already.totalItems) throw new Error('此申請已確認，請勿重複送出');
   const borrowedAt = new Date().toISOString();
   const updated = await client.collection(PB.borrowRequests).update(id, {
     status: 'borrowed'
@@ -345,8 +530,7 @@ export async function confirmCheckout(id) {
     processed_by: getProfile()?.id
   });
   await client.collection(PB.assets).update(asset.id, {
-    availability_status: 'checked_out',
-    current_loan: record.id
+    availability_status: 'checked_out'
   });
   try {
     await writeUsage(asset, {
@@ -366,22 +550,85 @@ export async function confirmCheckout(id) {
     throw new Error(pbMessage(error, '確認借出未完成，狀態已回復'));
   }
   return updated;
+  } finally {
+    deskBusy.delete(id);
+  }
 }
 
 export async function reviewReservation(id, action, reason = '') {
   requireDesk();
+  lockDesk(id);
   const client = requireClient();
-  const row = await client.collection(PB.reservationsV2).getOne(id);
-  if (row.status !== 'pending') throw new Error('只能處理待審核預借');
-  const status = action === 'approve' ? 'approved' : 'rejected';
-  return client.collection(PB.reservationsV2).update(id, {
-    status,
-    rejection_reason: status === 'rejected' ? collapse(reason) : ''
-  });
+  try {
+    if (String(id).startsWith('RV-')) {
+      const rows = await client.collection(PB.timeLocks).getFullList({
+        filter: `reservation_number = "${id}" && status = "pending"`
+      });
+      if (!rows.length) throw new Error('只能處理待審核預借');
+      const status = action === 'approve' ? 'approved' : 'rejected';
+      for (const row of rows) {
+        const patch = { status };
+        if (status === 'rejected') patch.slot_start = `released:${row.id}`;
+        await client.collection(PB.timeLocks).update(row.id, patch);
+      }
+      return { ok: true, status };
+    }
+    const row = await client.collection(PB.reservationsV2).getOne(id);
+    if (row.status !== 'pending') throw new Error('只能處理待審核預借');
+    const status = action === 'approve' ? 'approved' : 'rejected';
+    return client.collection(PB.reservationsV2).update(id, {
+      status,
+      rejection_reason: status === 'rejected' ? collapse(reason) : ''
+    });
+  } finally {
+    deskBusy.delete(id);
+  }
+}
+
+export async function confirmBorrowReturn(id) {
+  requireDesk();
+  lockDesk(id);
+  const client = requireClient();
+  try {
+    const borrow = await client.collection(PB.borrowRequests).getOne(id);
+    if (borrow.status !== 'return_pending') throw new Error('此筆不是待確認歸還');
+    const now = new Date().toISOString();
+    await client.collection(PB.borrowRequests).update(id, { status: 'returned' });
+    const records = await client.collection(PB.borrowRecords).getFullList({
+      filter: `borrow_request = "${id}" && status != "returned"`
+    });
+    await Promise.all(records.map((record) => client.collection(PB.borrowRecords).update(record.id, {
+      status: 'returned',
+      returned_at: now,
+      returned_by: getProfile()?.id
+    })));
+    if (borrow.asset) {
+      await client.collection(PB.assets).update(borrow.asset, {
+        availability_status: 'available',
+        current_loan: null
+      });
+    }
+    try {
+      await client.collection(PB.logs).create({
+        action: '確認歸還',
+        entity_type: PB.borrowRequests,
+        entity_id: id,
+        actor_name: getProfile()?.display_name || '經辦',
+        detail: { event: 'confirm_return', recordId: id }
+      });
+    } catch {
+      // 紀錄失敗不回復已完成的歸還，也不寫入電話
+    }
+    return { ok: true };
+  } finally {
+    deskBusy.delete(id);
+  }
 }
 
 export async function confirmReturn(id) {
   requireDesk();
+  lockDesk(id);
+  try {
   const client = requireClient();
   const request = await client.collection(PB.returnRequests).getOne(id);
   if (request.status !== 'pending') throw new Error('此歸還申請已處理');
@@ -405,6 +652,9 @@ export async function confirmReturn(id) {
     });
   }
   return client.collection(PB.returnRequests).update(id, { status: 'confirmed' });
+  } finally {
+    deskBusy.delete(id);
+  }
 }
 
 export function phonesEqual(left, right) {
