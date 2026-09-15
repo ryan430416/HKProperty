@@ -213,14 +213,20 @@ async function main() {
         await service.collection('hkp_reservations').delete(row.id);
       } catch { /* ignore */ }
     }
-    if (adminToken) {
-      authPb.authStore.save(adminToken, authPb.authStore.record);
+    if (created.assetIds.length) {
+      const adminPb = new PocketBase(pbUrl);
+      await adminPb.collection('hkp_staff_users').authWithPassword(env.HKP_FORMAL_ADMIN_EMAIL, env.HKP_FORMAL_PASSWORD);
       for (const id of created.assetIds) {
         try {
-          const row = await authPb.collection('hkp_assets').getOne(id);
-          if (String(row.property_id || '').startsWith('PROD-SMOKE-TMP-')) {
-            await authPb.collection('hkp_assets').delete(id);
-          }
+          const row = await adminPb.collection('hkp_assets').getOne(id);
+          if (!String(row.property_id || '').startsWith('PROD-SMOKE-TMP-')) continue;
+          await adminPb.collection('hkp_assets').update(id, {
+            deleted_at: new Date().toISOString(),
+            is_active: false,
+            enabled: false,
+            is_borrowable: false
+          });
+          try { await adminPb.collection('hkp_assets').delete(id); } catch { /* relation may remain; soft-delete is enough */ }
         } catch { /* ignore */ }
       }
     }

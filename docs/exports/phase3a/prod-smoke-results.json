@@ -1,0 +1,124 @@
+{
+  "productionUrl": "https://hk-property.vercel.app",
+  "passed": 23,
+  "failed": 0,
+  "failedItems": [],
+  "results": [
+    {
+      "name": "public.home",
+      "ok": true,
+      "detail": "bytes=58336"
+    },
+    {
+      "name": "public.assets_390",
+      "ok": true,
+      "detail": "got=390"
+    },
+    {
+      "name": "public.whitelist",
+      "ok": true,
+      "detail": "id,propertyId,name,location,available,availabilityLabel"
+    },
+    {
+      "name": "public.search",
+      "ok": true,
+      "detail": "items=1"
+    },
+    {
+      "name": "public.location",
+      "ok": true,
+      "detail": "items=5"
+    },
+    {
+      "name": "security.unauth_staff",
+      "ok": true,
+      "detail": "checked"
+    },
+    {
+      "name": "security.unauth_admin_logs",
+      "ok": true,
+      "detail": "checked"
+    },
+    {
+      "name": "staff.login",
+      "ok": true,
+      "detail": "role=staff"
+    },
+    {
+      "name": "staff.admin_logs_403",
+      "ok": true,
+      "detail": "error=forbidden"
+    },
+    {
+      "name": "staff.cannot_create_asset",
+      "ok": true,
+      "detail": "error=forbidden"
+    },
+    {
+      "name": "admin.login",
+      "ok": true,
+      "detail": "role=admin"
+    },
+    {
+      "name": "admin.operation_logs",
+      "ok": true,
+      "detail": "items=5"
+    },
+    {
+      "name": "smoke.create_tmp_asset",
+      "ok": true,
+      "detail": "id=877bqav5mxi9dwr"
+    },
+    {
+      "name": "smoke.create_reservation",
+      "ok": true,
+      "detail": "status=pending"
+    },
+    {
+      "name": "smoke.approve",
+      "ok": true,
+      "detail": "status=approved"
+    },
+    {
+      "name": "smoke.checkout",
+      "ok": true,
+      "detail": "status=checked_out"
+    },
+    {
+      "name": "smoke.usage_plus_one",
+      "ok": true,
+      "detail": "before=0,after=1"
+    },
+    {
+      "name": "smoke.return_request",
+      "ok": true,
+      "detail": "status=return_requested"
+    },
+    {
+      "name": "smoke.return_confirm",
+      "ok": true,
+      "detail": "status=returned"
+    },
+    {
+      "name": "smoke.asset_available_again",
+      "ok": true,
+      "detail": "status=available"
+    },
+    {
+      "name": "cleanup",
+      "ok": true,
+      "detail": "requestNos=1,assets=1"
+    },
+    {
+      "name": "final.count_390",
+      "ok": true,
+      "detail": "count=390"
+    },
+    {
+      "name": "final.fingerprint",
+      "ok": true,
+      "detail": "fp=421e9ee0b22544a47ecf3ec0be3beeb7d0b73f97accf026e3f5e8c14af423132"
+    }
+  ],
+  "recommendPhase3B": true
+}
