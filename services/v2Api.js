@@ -131,3 +131,22 @@ export async function inventorySaveRecord(token, payload) {
     body: JSON.stringify(payload)
   }));
 }
+
+export async function adminListOperationLogs(token, {
+  page = 1,
+  perPage = 20,
+  action = '',
+  from = '',
+  to = ''
+} = {}) {
+  const params = new URLSearchParams({
+    page: String(page),
+    perPage: String(perPage)
+  });
+  if (action) params.set('action', action);
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  return parse(await fetch(`${apiBase()}/api/admin/operation-logs?${params}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  }));
+}

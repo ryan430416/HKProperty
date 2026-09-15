@@ -73,6 +73,7 @@ import {
 } from '../services/authService.js';
 import { PB } from '../pocketbase/schema.mjs';
 import {
+  adminListOperationLogs,
   inventoryCreateSession,
   inventoryGetRecords,
   inventoryListSessions,
@@ -867,18 +868,20 @@ async function renderStaffDesk() {
 }
 
 async function renderLogs() {
-  if (!isStaff()) {
+  if (!isAdmin()) {
     $('operationLogList').innerHTML = '<div class="empty">沒有權限查看操作紀錄</div>';
     return;
   }
   try {
-    const rows = await loadOperationLogs();
+    const token = staffToken();
+    const result = await adminListOperationLogs(token, { page: 1, perPage: 50 });
+    const rows = result.items || [];
     $('operationLogList').innerHTML = rows.length
       ? rows.map((row) => `
         <div class="log-item">
           <div>
             <strong>${esc(row.action)}</strong>
-            <div class="muted">${esc(row.actor_name || '系統')} · ${esc(formatDateTime(row.created_at))}</div>
+            <div class="muted">${esc(row.actorName || '系統')} · ${esc(formatDateTime(row.createdAt))}</div>
             <div class="muted">${esc(JSON.stringify(row.detail || {}))}</div>
           </div>
         </div>

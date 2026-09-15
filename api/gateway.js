@@ -12,6 +12,7 @@ import inventorySessions from '../server/handlers/inventorySessions.js';
 import inventoryRecords from '../server/handlers/inventoryRecords.js';
 import adminAssets from '../server/handlers/adminAssets.js';
 import adminStaff from '../server/handlers/adminStaff.js';
+import adminOperationLogs from '../server/handlers/adminOperationLogs.js';
 
 const routes = new Map([
   ['/api/public/assets', publicAssets],
@@ -26,7 +27,8 @@ const routes = new Map([
   ['/api/inventory/sessions', inventorySessions],
   ['/api/inventory/records', inventoryRecords],
   ['/api/admin/assets', adminAssets],
-  ['/api/admin/staff', adminStaff]
+  ['/api/admin/staff', adminStaff],
+  ['/api/admin/operation-logs', adminOperationLogs]
 ]);
 
 export default async function handler(req, res) {

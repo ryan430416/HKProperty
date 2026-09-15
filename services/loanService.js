@@ -176,16 +176,7 @@ export function listActivity() {
 
 export async function loadOperationLogs() {
   if (isDemoMode()) return demoLogs();
-  try {
-    const rows = await getFullList(PB.logs, { sort: '-created' });
-    return (rows || []).slice(0, 200).map((row) => ({
-      ...row,
-      created_at: row.created,
-      actor_name: row.actor_name
-    }));
-  } catch (error) {
-    throw new Error(pbMessage(error, '無法載入操作紀錄'));
-  }
+  throw new Error('請改由管理端 API 載入操作紀錄');
 }
 
 export function getLoan(loanId) {

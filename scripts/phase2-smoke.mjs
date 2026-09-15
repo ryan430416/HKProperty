@@ -131,11 +131,16 @@ try {
   }
 }
 
-const count = (await root.collection('hkp_assets').getList(1, 1)).totalItems;
+const countFilter = '(deleted_at = "" || deleted_at = null)';
+const count = (await root.collection('hkp_assets').getList(1, 1, { filter: countFilter })).totalItems;
 ok('assets_still_390', count === 390, `n=${count}`);
 
 const cryptoMod = await import('node:crypto');
-const ids = (await root.collection('hkp_assets').getFullList({ fields: 'property_id', sort: 'property_id' }))
+const ids = (await root.collection('hkp_assets').getFullList({
+  fields: 'property_id',
+  sort: 'property_id',
+  filter: countFilter
+}))
   .map((r) => r.property_id || '').join('\n');
 const hash = cryptoMod.createHash('sha256').update(ids).digest('hex');
 ok('fingerprint', hash === '421e9ee0b22544a47ecf3ec0be3beeb7d0b73f97accf026e3f5e8c14af423132', hash);
