@@ -23,7 +23,11 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-html, body { margin: 0; width: 100%; }
+html, body {
+  margin: 0;
+  width: 100%;
+  max-width: 100%;
+}
 .app, .shell, main, .topbar, .panel, .public-portal, .portal-shell { max-width: 100%; min-width: 0; }
 body {
   min-height: 100vh;
@@ -177,6 +181,7 @@ button { cursor: pointer; }
   border-radius: 8px;
   padding: 10px 12px;
   background: #f8fafc;
+  font-size: 16px;
 }
 .menu-btn, .scan-icon { display: none; }
 .icon-btn {
@@ -726,6 +731,11 @@ form, #historyBody, #detailBody { padding: 12px 18px 18px; }
   dialog { width: calc(100% - 16px); max-height: calc(100dvh - 12px); }
   dialog.form-dialog form { max-height: calc(100dvh - 12px); }
   dialog.drawer { width: 100%; }
+  input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
 }
 
 @media (max-width: 420px) {
