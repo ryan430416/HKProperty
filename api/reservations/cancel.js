@@ -1,7 +1,7 @@
-import { getServiceClient } from '../_lib/pb.js';
-import { clientError, clientIp, json, methodNotAllowed, rateLimit, readJson, safeError } from '../_lib/http.js';
-import { hashToken } from '../_lib/security.js';
-import { assertTransition, RESERVATION_STATUS } from '../_lib/status.js';
+import { getServiceClient } from '../../server/pb.js';
+import { clientError, clientIp, json, methodNotAllowed, rateLimit, readJson, safeError } from '../../server/http.js';
+import { hashToken } from '../../server/security.js';
+import { assertTransition, RESERVATION_STATUS } from '../../server/status.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return methodNotAllowed(res);

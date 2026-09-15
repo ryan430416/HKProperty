@@ -1,6 +1,6 @@
-import { getStaffClient } from '../_lib/pb.js';
-import { clientError, json, methodNotAllowed, readJson, safeError } from '../_lib/http.js';
-import { assertTransition, canTransition, RESERVATION_STATUS } from '../_lib/status.js';
+import { getStaffClient } from '../../server/pb.js';
+import { clientError, json, methodNotAllowed, readJson, safeError } from '../../server/http.js';
+import { assertTransition, canTransition, RESERVATION_STATUS } from '../../server/status.js';
 
 async function loadReservation(client, idOrNo) {
   const key = String(idOrNo || '').trim();

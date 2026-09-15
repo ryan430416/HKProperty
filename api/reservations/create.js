@@ -1,7 +1,7 @@
-import { getServiceClient, publicAssetFields } from '../_lib/pb.js';
-import { clientError, clientIp, json, methodNotAllowed, rateLimit, readJson, safeError } from '../_lib/http.js';
-import { assertPerson, createRequestNo, createVerificationCode, hashToken } from '../_lib/security.js';
-import { RESERVATION_STATUS } from '../_lib/status.js';
+import { getServiceClient, publicAssetFields } from '../../server/pb.js';
+import { clientError, clientIp, json, methodNotAllowed, rateLimit, readJson, safeError } from '../../server/http.js';
+import { assertPerson, createRequestNo, createVerificationCode, hashToken } from '../../server/security.js';
+import { RESERVATION_STATUS } from '../../server/status.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return methodNotAllowed(res);

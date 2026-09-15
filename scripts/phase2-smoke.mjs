@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import PocketBase from 'pocketbase';
 import { RESERVATION_STATUS, canTransition, assertTransition } from '../shared/reservationStatus.js';
-import { createRequestNo, createVerificationCode, hashToken, assertPerson } from '../api/_lib/security.js';
+import { createRequestNo, createVerificationCode, hashToken, assertPerson } from '../server/security.js';
 
 function readEnv(file) {
   const env = {};
