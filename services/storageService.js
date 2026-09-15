@@ -1,27 +1,13 @@
-import { PB } from '../pocketbase/schema.mjs';
-import { pbMessage, requireClient } from './pocketbaseClient.js';
+/**
+ * Asset photo upload/display is disabled in the UI.
+ * Existing PocketBase `photo` / `image` files are left untouched on purpose.
+ * Do not re-enable uploads without an explicit product decision.
+ */
 
-const ALLOWED = ['image/jpeg', 'image/png', 'image/webp'];
-const MAX_BYTES = 5 * 1024 * 1024;
-
-export function publicImageUrl(record, filename) {
-  if (!record || !filename) return '';
-  const client = requireClient();
-  return client.files.getURL(record, filename);
+export function publicImageUrl() {
+  return '';
 }
 
-export async function uploadAssetImage(assetId, file) {
-  if (!file) throw new Error('請先選擇圖片');
-  if (!ALLOWED.includes(file.type)) throw new Error('僅支援 JPG、PNG、WebP');
-  if (file.size > MAX_BYTES) throw new Error('檔案大小不可超過 5 MB');
-  const client = requireClient();
-  const form = new FormData();
-  form.append('image', file);
-  try {
-    const row = await client.collection(PB.assets).update(assetId, form);
-    const name = Array.isArray(row.image) ? row.image[0] : row.image;
-    return publicImageUrl(row, name);
-  } catch (error) {
-    throw new Error(pbMessage(error, '圖片上傳失敗'));
-  }
+export async function uploadAssetImage() {
+  throw new Error('財產圖片上傳功能已停用');
 }

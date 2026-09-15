@@ -1,7 +1,6 @@
 import { PB } from '../pocketbase/schema.mjs';
 import { getProfile, isStaff } from './authService.js';
 import { pbMessage, requireClient } from './pocketbaseClient.js';
-import { publicImageUrl } from './storageService.js';
 import {
   VERIFY_FAIL,
   collapse,
@@ -18,16 +17,6 @@ import {
 
 const HOOK_MISSING = '借用服務尚未完成伺服器驗證設定，請改洽經辦人員辦理。';
 
-function guestImage(row) {
-  const filename = Array.isArray(row.photo) ? row.photo[0] : row.photo;
-  if (!filename) return '';
-  try {
-    return publicImageUrl({ ...row, collectionId: row.collectionId, collectionName: PB.assetsGuest }, filename);
-  } catch {
-    return '';
-  }
-}
-
 export function mapGuestAsset(row) {
   const status = row.availability_status || 'available';
   const borrowable = row.is_borrowable !== false;
@@ -37,9 +26,9 @@ export function mapGuestAsset(row) {
     propertyId: String(row.property_id || ''),
     name: row.name || '',
     location: row.location || '',
+    specification: row.specification || '',
     availabilityStatus: status,
-    available,
-    image: guestImage(row)
+    available
   };
 }
 
@@ -51,6 +40,7 @@ export async function listGuestAssets(query = '') {
     : 'is_active != false';
   const rows = await client.collection(PB.assetsGuest).getList(1, 24, {
     filter,
+    fields: 'id,property_id,name,location,availability_status,is_borrowable,is_active,specification',
     ...(q ? { q } : {})
   });
   return (rows.items || []).map(mapGuestAsset);

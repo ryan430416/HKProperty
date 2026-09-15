@@ -3,7 +3,7 @@ const LANDLINE = /^0\d{1,2}-?\d{6,8}$/;
 const EXT = /^(?:0\d{1,2}-?)?\d{6,8}#\d{1,6}$/;
 
 export const PRIVACY_NOTICE = '所填資料僅供財產預借、借用、歸還聯繫及管理使用。';
-export const VERIFY_FAIL = '借用資料驗證失敗，請確認借用編號、姓名及電話。';
+export const VERIFY_FAIL = '借用資料驗證失敗，請確認申請編號、姓名、電話及驗證碼。';
 
 export function collapse(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();

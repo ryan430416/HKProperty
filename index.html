@@ -13,68 +13,71 @@
 </head>
 <body>
   <div id="publicPortal" class="public-portal">
+    <div class="portal-shell">
     <header class="portal-top">
       <div>
         <p class="eyebrow">弘光科技大學</p>
         <h1>財產借用</h1>
       </div>
-      <button type="button" class="ghost-btn" id="staffLoginOpen">經辦／管理登入</button>
+      <button type="button" class="ghost-btn portal-login" id="staffLoginOpen">經辦／管理登入</button>
     </header>
     <div data-portal-step="home" class="portal-home">
-      <button type="button" class="portal-action" id="portalHomeReserve">我要預借</button>
-      <button type="button" class="portal-action" id="portalHomeBorrow">我要借用</button>
-      <button type="button" class="portal-action" id="portalHomeReturn">我要歸還</button>
-      <div class="portal-tools">
-        <button type="button" class="secondary" id="portalScanBtn">掃描財產 QR Code</button>
-        <form id="portalSearchForm" class="portal-search">
-          <label class="sr-only" for="portalQuery">財產編號或名稱</label>
-          <input id="portalQuery" type="search" maxlength="80" placeholder="輸入財產編號或物品名稱" />
-          <button type="submit" class="primary">搜尋</button>
-        </form>
+      <div class="portal-actions-grid">
+        <button type="button" class="portal-action" id="portalHomeReserve">我要預借</button>
+        <button type="button" class="portal-action" id="portalHomeBorrow">我要借用</button>
+        <button type="button" class="portal-action" id="portalHomeReturn">我要歸還</button>
+        <button type="button" class="portal-action portal-action-scan" id="portalScanBtn">掃描 QR Code</button>
       </div>
+      <form id="portalSearchForm" class="portal-search">
+        <label class="sr-only" for="portalQuery">財產編號或名稱</label>
+        <input id="portalQuery" type="search" maxlength="80" placeholder="搜尋物品名稱或財編" />
+        <button type="submit" class="primary">搜尋</button>
+      </form>
       <div id="portalCamera" hidden><video id="portalCameraVideo" playsinline></video></div>
-      <p class="muted portal-foot">不需註冊或登入。只會顯示物品圖片、名稱、編號、可借用狀態與取件位置。</p>
-      <button type="button" class="text-btn" id="portalLoginFoot">經辦／管理登入</button>
+      <p class="muted portal-foot">不需註冊或登入。只會顯示名稱、財編、可借用狀態與取件位置。</p>
     </div>
     <div data-portal-step="search" hidden>
       <button type="button" class="ghost-btn" id="portalBack">回首頁</button>
-      <div id="portalResults"></div>
+      <div id="portalResults" class="portal-results"></div>
     </div>
-    <form data-portal-step="form" id="portalForm" class="portal-form" hidden>
+    <form data-portal-step="form" id="portalForm" class="portal-form" hidden novalidate>
       <button type="button" class="ghost-btn" id="portalFormBack">返回</button>
       <h2 id="portalFormTitle">借用</h2>
       <p id="portalAssetBox" class="portal-asset"></p>
       <div class="field" id="portalUnitWrap">
         <label for="portalUnit">單位 <span class="req">必填</span></label>
         <input id="portalUnit" maxlength="50" autocomplete="organization" />
+        <p class="field-error" id="portalUnitError" role="alert"></p>
       </div>
       <div class="field">
         <label for="portalName">姓名 <span class="req">必填</span></label>
         <input id="portalName" maxlength="30" autocomplete="name" />
+        <p class="field-error" id="portalNameError" role="alert"></p>
       </div>
       <div class="field">
         <label for="portalPhone">電話 <span class="req">必填</span></label>
-        <input id="portalPhone" maxlength="20" inputmode="tel" autocomplete="tel" />
+        <input id="portalPhone" type="tel" maxlength="20" inputmode="tel" autocomplete="tel" />
+        <p class="field-error" id="portalPhoneError" role="alert"></p>
       </div>
       <div id="portalReserveFields" hidden>
-        <div class="field"><label for="portalStart">預借開始時間</label><input id="portalStart" type="datetime-local" /></div>
-        <div class="field"><label for="portalEnd">預計歸還時間</label><input id="portalEnd" type="datetime-local" /></div>
+        <div class="field"><label for="portalStart">預借開始時間 <span class="req">必填</span></label><input id="portalStart" type="datetime-local" /></div>
+        <div class="field"><label for="portalEnd">預計歸還時間 <span class="req">必填</span></label><input id="portalEnd" type="datetime-local" /></div>
         <div class="field"><label for="portalReservePurpose">用途</label><input id="portalReservePurpose" maxlength="80" /></div>
       </div>
       <div id="portalBorrowFields" hidden>
-        <div class="field"><label for="portalReturnAt">預計歸還時間</label><input id="portalReturnAt" type="datetime-local" /></div>
+        <div class="field"><label for="portalReturnAt">預計歸還時間 <span class="req">必填</span></label><input id="portalReturnAt" type="datetime-local" /></div>
         <div class="field"><label for="portalPurpose">用途</label><input id="portalPurpose" maxlength="80" /></div>
         <div class="field"><label for="portalCondition">物品借出狀況</label><input id="portalCondition" maxlength="80" /></div>
       </div>
       <div id="portalReturnFields" hidden>
-        <div class="field"><label for="portalRequestNumber">借用編號</label><input id="portalRequestNumber" maxlength="40" autocomplete="off" /></div>
-        <div class="field"><label for="portalToken">歸還驗證碼</label><input id="portalToken" maxlength="80" autocomplete="off" /></div>
-        <div class="field"><label for="portalReturnProperty">財產編號</label><input id="portalReturnProperty" maxlength="40" /></div>
-        <div class="field"><label for="portalReturnCondition">物品歸還狀況</label><input id="portalReturnCondition" maxlength="80" /></div>
+        <div class="field"><label for="portalRequestNumber">申請編號 <span class="req">必填</span></label><input id="portalRequestNumber" maxlength="40" autocomplete="off" /></div>
+        <div class="field"><label for="portalToken">歸還驗證碼 <span class="req">必填</span></label><input id="portalToken" maxlength="80" autocomplete="off" /></div>
+        <div class="field"><label for="portalReturnProperty">財產編號 <span class="req">必填</span></label><input id="portalReturnProperty" maxlength="40" /></div>
+        <div class="field"><label for="portalReturnCondition">物品歸還狀況 <span class="req">必填</span></label><input id="portalReturnCondition" maxlength="80" /></div>
       </div>
       <div class="field"><label for="portalNote">備註</label><textarea id="portalNote" maxlength="200"></textarea></div>
       <label class="choice" id="portalPrivacyWrap"><input id="portalPrivacy" type="checkbox" /> <span id="portalPrivacyText"></span></label>
-      <div class="portal-actions">
+      <div class="portal-actions portal-sticky-actions">
         <button type="submit" class="primary" id="portalSubmit">送出</button>
         <button type="button" class="secondary" id="portalLookupBtn">查詢我的申請</button>
       </div>
@@ -91,10 +94,11 @@
       <input id="cancelNumber" placeholder="申請編號" maxlength="40" autocomplete="off" />
       <input id="cancelToken" placeholder="驗證碼" maxlength="80" autocomplete="off" />
       <input id="cancelName" placeholder="姓名" maxlength="30" />
-      <input id="cancelPhone" placeholder="電話" maxlength="20" />
+      <input id="cancelPhone" type="tel" placeholder="電話" maxlength="20" inputmode="tel" autocomplete="tel" />
       <button type="submit" class="secondary">取消預借</button>
     </form>
     <p id="portalMessage" class="portal-message" hidden></p>
+    </div>
   </div>
   <dialog id="staffLoginDialog">
     <form id="staffLoginForm" method="dialog">
@@ -567,7 +571,6 @@
             <table class="data-table">
               <thead>
                 <tr>
-                  <th scope="col">圖片</th>
                   <th scope="col">財產名稱</th>
                   <th scope="col">財產編號</th>
                   <th scope="col">目前位置</th>
@@ -932,32 +935,6 @@
       <div class="dialog-actions">
         <button type="button" class="secondary" data-close="locationDialog">取消</button>
         <button type="submit" class="primary">確認更新</button>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog id="imageDialog">
-    <form id="imageForm">
-      <div class="dialog-head">
-        <div>
-          <p class="eyebrow" id="imageEyebrow">上傳圖片</p>
-          <h2>上傳物品圖片</h2>
-        </div>
-        <button type="button" class="icon-btn" data-close="imageDialog" aria-label="關閉">×</button>
-      </div>
-      <input type="hidden" id="imagePropertyId" />
-      <p class="muted">僅支援 JPG、PNG、WebP，檔案請小於 5 MB。手機可直接拍照上傳。</p>
-      <div class="image-preview" id="imagePreviewBox">
-        <img id="imagePreview" alt="圖片預覽" />
-      </div>
-      <div class="field">
-        <label for="imageFile">選擇圖片或拍照</label>
-        <input id="imageFile" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" />
-      </div>
-      <p class="form-error" id="imageError" role="alert"></p>
-      <div class="dialog-actions">
-        <button type="button" class="secondary" data-close="imageDialog">取消</button>
-        <button type="submit" class="primary" id="imageSaveBtn" disabled>儲存圖片</button>
       </div>
     </form>
   </dialog>

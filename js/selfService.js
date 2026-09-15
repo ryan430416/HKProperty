@@ -10,7 +10,7 @@ import {
   overdueDuration,
   verifySelfServiceLoan
 } from '../services/loanService.js';
-import { displayValue, esc, formatDateTime, toInputDateTime } from './format.js';
+import { displayValue, esc, formatDateTime, toInputDateTime, categoryIcon } from './format.js';
 import { getProfile } from '../services/authService.js';
 import { toast } from './ui.js';
 
@@ -180,10 +180,10 @@ function renderAvailableBorrowList() {
   list.innerHTML = visible.length
     ? visible.map((item) => `
       <button type="button" class="ss-available-item" role="listitem" data-borrow-pick="${esc(item.propertyId)}">
-        <img src="${esc(item.image)}" alt="">
+        ${categoryIcon(item.name, item.specification)}
         <span class="ss-available-body">
-          <strong>${esc(item.name)}</strong>
-          <span class="muted">${esc(displayValue(item.location))}</span>
+          <strong class="asset-name">${esc(item.name)}</strong>
+          <span class="muted wrap-cell">${esc(displayValue(item.location))}</span>
           <span class="badge ok">可借用</span>
         </span>
       </button>

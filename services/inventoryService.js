@@ -1,10 +1,9 @@
 import { PB } from '../pocketbase/schema.mjs';
-import { AUDIT_STATUS, PLACEHOLDER_IMAGE } from '../js/format.js';
+import { AUDIT_STATUS } from '../js/format.js';
 import { isDemoMode, isStaff } from './authService.js';
-import { demoAssets, demoSavePhoto, demoSetActive } from './demoStore.js';
+import { demoAssets, demoSetActive } from './demoStore.js';
 import { hkpPost } from './hkpApi.js';
 import { logPocketBaseError, pbMessage, requireClient } from './pocketbaseClient.js';
-import { publicImageUrl, uploadAssetImage } from './storageService.js';
 
 export const AVAILABILITY = {
   AVAILABLE: 'available',
@@ -26,19 +25,12 @@ export const AVAILABILITY_LABEL = {
   lost: '異常'
 };
 
-const PUBLIC_FIELDS = 'id,property_id,name,location,specification,unit,availability_status,usage_count,is_borrowable,is_active,asset_status,brand,model,photo,audit_status';
+const PUBLIC_FIELDS = 'id,property_id,name,location,specification,unit,availability_status,usage_count,is_borrowable,is_active,asset_status,brand,model,audit_status';
 const STAFF_FIELDS = `${PUBLIC_FIELDS},department,custodian,price,purchase_date,service_life,supplier,note,current_loan,last_audit_at,return_alert`;
 
 let cache = [];
 let loaded = false;
 let overdueAssetIds = new Set();
-
-function photoName(row) {
-  const raw = row?.image || row?.photo;
-  if (!raw) return '';
-  if (typeof raw === 'string' && raw.startsWith('data:')) return raw;
-  return Array.isArray(raw) ? raw[0] : raw;
-}
 
 export function mapAsset(row) {
   let availabilityStatus = row.availability_status || AVAILABILITY.AVAILABLE;
@@ -46,7 +38,6 @@ export function mapAsset(row) {
   if (availabilityStatus === AVAILABILITY.CHECKED_OUT && overdueAssetIds.has(row.id)) {
     availabilityStatus = AVAILABILITY.OVERDUE;
   }
-  const filename = photoName(row);
   const borrowable = row.borrowable !== false && row.is_borrowable !== false;
   const active = row.active !== false && row.is_active !== false;
   return {
@@ -76,8 +67,6 @@ export function mapAsset(row) {
     availabilityLabel: AVAILABILITY_LABEL[availabilityStatus] || AVAILABILITY_LABEL.available,
     currentLoanId: row.current_loan || null,
     returnAlert: row.return_alert || null,
-    image: !filename ? PLACEHOLDER_IMAGE : filename.startsWith('data:') ? filename : publicImageUrl(row, filename),
-    hasCustomImage: Boolean(filename),
     _raw: row
   };
 }
@@ -208,15 +197,6 @@ export function getStats() {
     lost: items.filter((item) => item.availabilityStatus === AVAILABILITY.LOST).length,
     pending: auditPending
   };
-}
-
-export async function saveImage(propertyId, file) {
-  const item = getItem(propertyId);
-  if (!item) throw new Error('找不到財產');
-  if (isDemoMode()) await demoSavePhoto(item.id, file);
-  else await uploadAssetImage(item.id, file);
-  await loadCatalog();
-  return getItem(propertyId);
 }
 
 export async function setAssetActive(propertyId, isActive) {

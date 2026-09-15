@@ -1,9 +1,7 @@
 import {
   AUDIT_STATUS,
   PAGE_SIZE,
-  IMAGE_MAX_BYTES,
-  IMAGE_TYPES,
-  PLACEHOLDER_IMAGE,
+  categoryIcon,
   displayValue,
   esc,
   formatDate,
@@ -24,8 +22,7 @@ import {
   getStats,
   listItems,
   loadCatalog,
-  locationRanking,
-  saveImage
+  locationRanking
 } from '../services/inventoryService.js';
 import { addUsage, listUsage, loadUsage } from '../services/usageService.js';
 import { addAudit, confirmLocationUpdate, listAudits, listLocationChanges, loadAudits, loadLocationHistory } from '../services/auditService.js';
@@ -133,17 +130,12 @@ const state = {
   loanHistoryPage: 1,
   historyTab: 'usage',
   historyId: '',
-  pendingImage: '',
   pendingCheckout: null,
   returnToDetailId: null
 };
 
 function $(id) {
   return document.getElementById(id);
-}
-
-function imageOf(item) {
-  return item?.image || PLACEHOLDER_IMAGE;
 }
 
 async function refreshData() {
@@ -419,7 +411,7 @@ function renderInventory() {
   const data = paginate(filteredItems(), state.page);
   const staff = isStaff();
   state.page = data.page;
-  const colSpan = staff ? 13 : 8;
+  const colSpan = staff ? 12 : 7;
   if (!data.total) {
     $('inventoryBody').innerHTML = `<tr><td colspan="${colSpan}"><div class="empty">找不到符合條件的財產</div></td></tr>`;
     $('inventoryCards').innerHTML = '<div class="empty">找不到符合條件的財產</div>';
@@ -429,11 +421,10 @@ function renderInventory() {
 
   $('inventoryBody').innerHTML = data.rows.map((item) => `
     <tr>
-      <td><div class="thumb"><img src="${esc(imageOf(item))}" alt="${esc(item.name)}"></div></td>
-      <td>${esc(item.name)}</td>
+      <td><div class="name-cell">${categoryIcon(item.name, item.specification)}<span class="asset-name">${esc(item.name)}</span></div></td>
       <td class="pid">${esc(item.propertyId)}</td>
-      <td>${esc(displayValue(item.location))}</td>
-      ${staff ? `<td>${esc(displayValue(item.department))}</td>` : ''}
+      <td class="wrap-cell">${esc(displayValue(item.location))}</td>
+      ${staff ? `<td class="wrap-cell">${esc(displayValue(item.department))}</td>` : ''}
       ${staff ? `<td>${esc(displayValue(item.custodian))}</td>` : ''}
       <td>${item.useCount}</td>
       <td><span class="badge">${esc(displayValue(item.status))}</span></td>
@@ -447,12 +438,11 @@ function renderInventory() {
 
   $('inventoryCards').innerHTML = data.rows.map((item) => `
     <article class="asset-card">
-      <div class="photo"><img src="${esc(imageOf(item))}" alt="${esc(item.name)}"></div>
       <div class="body">
-        <h3>${esc(item.name)}</h3>
+        <div class="name-cell">${categoryIcon(item.name, item.specification)}<h3 class="asset-name">${esc(item.name)}</h3></div>
         <div class="pid">${esc(item.propertyId)}</div>
-        <div class="meta-row"><span>${esc(displayValue(item.location))}</span>${availabilityBadge(item)}</div>
-        <div class="meta-row">${staff ? `<span>${esc(displayValue(item.custodian))}</span>` : '<span></span>'}<span>使用 ${item.useCount} 次</span></div>
+        <div class="meta-row"><span class="wrap-cell">${esc(displayValue(item.location))}</span>${availabilityBadge(item)}</div>
+        <div class="meta-row"><span>使用 ${item.useCount} 次</span><span>${esc(displayValue(item.status))}</span></div>
         <div class="card-actions">
           <button type="button" class="link-btn" data-open-item="${esc(item.propertyId)}">查看資料</button>
         </div>
@@ -467,9 +457,9 @@ function loanRowHTML(loan) {
   const overdue = isLoanOverdue(loan);
   return `
     <div class="audit-item ${overdue ? 'overdue-box' : ''}">
-      <div class="thumb"><img src="${esc(imageOf(item))}" alt="${esc(loan.propertyName)}"></div>
+      ${categoryIcon(loan.propertyName)}
       <div>
-        <strong>${esc(loan.propertyName)}</strong>
+        <strong class="asset-name">${esc(loan.propertyName)}</strong>
         <div class="pid">${esc(loan.propertyId)}</div>
         <div class="muted">${esc(loan.borrowerName)}／${esc(loan.borrowerDepartment)}</div>
         <div class="muted">借出 ${esc(formatDateTime(loan.checkedOutAt))} · 應還 ${esc(formatDateTime(loan.expectedReturnAt))}</div>
@@ -529,11 +519,11 @@ function renderLoans() {
     $('loanBoard').innerHTML = data.rows.length
       ? data.rows.map((item) => `
         <div class="audit-item">
-          <div class="thumb"><img src="${esc(imageOf(item))}" alt="${esc(item.name)}"></div>
+          ${categoryIcon(item.name, item.specification)}
           <div>
-            <strong>${esc(item.name)}</strong>
+            <strong class="asset-name">${esc(item.name)}</strong>
             <div class="pid">${esc(item.propertyId)}</div>
-            <div class="muted">${esc(displayValue(item.location))}</div>
+            <div class="muted wrap-cell">${esc(displayValue(item.location))}</div>
           </div>
           ${availabilityBadge(item)}
           <div class="card-actions">
@@ -884,10 +874,10 @@ function openItem(propertyId) {
       ].filter(Boolean);
   $('detailTitle').textContent = item.name || '財產';
   $('detailBody').innerHTML = `
-    <div class="detail-photo"><img src="${esc(imageOf(item))}" alt="${esc(item.name)}"></div>
+    <div class="detail-glyph">${categoryIcon(item.name, item.specification)}</div>
     ${alert}
     <dl>
-      ${fields.map(([k, v]) => `<div class="kv"><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}
+      ${fields.map(([k, v]) => `<div class="kv"><dt>${esc(k)}</dt><dd class="wrap-cell">${esc(v)}</dd></div>`).join('')}
     </dl>
     <div class="action-grid">
       ${staff ? loanActionButtons(item) : `<button type="button" class="primary" data-self="borrow">前往自助借用</button>`}
@@ -895,7 +885,6 @@ function openItem(propertyId) {
       <button type="button" class="secondary" data-usage="${esc(item.propertyId)}">登記使用一次</button>
       ${staff ? `<button type="button" class="primary" data-audit="${esc(item.propertyId)}">執行盤點</button>
       <button type="button" class="secondary" data-location="${esc(item.propertyId)}">更新位置</button>
-      <button type="button" class="secondary" data-image="${esc(item.propertyId)}">上傳圖片</button>
       <button type="button" class="secondary" data-history="${esc(item.propertyId)}">查看紀錄</button>` : ''}
     </div>
     <div class="action-hint">
@@ -1015,20 +1004,6 @@ function openLocation(propertyId) {
   $('locationReason').value = '';
   state.returnToDetailId = item.propertyId;
   openExclusiveDialog('locationDialog');
-}
-
-function openImage(propertyId) {
-  const item = getItem(propertyId);
-  if (!item) return;
-  state.pendingImage = '';
-  $('imagePropertyId').value = item.propertyId;
-  $('imageEyebrow').textContent = `${item.name} · ${item.propertyId}`;
-  $('imagePreview').src = imageOf(item);
-  $('imageFile').value = '';
-  $('imageError').textContent = '';
-  $('imageSaveBtn').disabled = true;
-  state.returnToDetailId = item.propertyId;
-  openExclusiveDialog('imageDialog');
 }
 
 function historyListHTML(rows, emptyText, line) {
@@ -1261,7 +1236,7 @@ function restoreDetailAfterClose(closedId) {
   }
   const shouldRestore = [
     'checkoutDialog', 'checkinDialog', 'usageDialog', 'auditDialog',
-    'locationDialog', 'imageDialog', 'historyDialog', 'confirmDialog', 'reservationDialog'
+    'locationDialog', 'historyDialog', 'confirmDialog', 'reservationDialog'
   ].includes(closedId);
   if (shouldRestore && state.returnToDetailId) openItem(state.returnToDetailId);
 }
@@ -1448,11 +1423,6 @@ function bindEvents() {
     const locBtn = event.target.closest('[data-location]');
     if (locBtn) {
       openLocation(locBtn.dataset.location);
-      return;
-    }
-    const imageBtn = event.target.closest('[data-image]');
-    if (imageBtn) {
-      openImage(imageBtn.dataset.image);
       return;
     }
     const historyBtn = event.target.closest('[data-history]');
@@ -1752,42 +1722,6 @@ function bindEvents() {
     toast('已維持原位置');
   });
 
-  $('imageFile').addEventListener('change', () => {
-    const file = $('imageFile').files[0];
-    $('imageError').textContent = '';
-    $('imageSaveBtn').disabled = true;
-    state.pendingImage = '';
-    if (!file) return;
-    if (!IMAGE_TYPES.includes(file.type)) {
-      $('imageError').textContent = '僅支援 JPG、PNG、WebP';
-      toast('圖片格式不正確', 'error');
-      return;
-    }
-    if (file.size > IMAGE_MAX_BYTES) {
-      $('imageError').textContent = '檔案大小不可超過 5 MB';
-      toast('檔案過大，請重新選擇', 'error');
-      return;
-    }
-    state.pendingImage = file;
-    $('imagePreview').src = URL.createObjectURL(file);
-    $('imageSaveBtn').disabled = false;
-  });
-
-  $('imageForm').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    if (!state.pendingImage) {
-      $('imageError').textContent = '請先選擇圖片';
-      return;
-    }
-    try {
-      const item = await saveImage($('imagePropertyId').value, state.pendingImage);
-      closeDialog('imageDialog', { silent: true });
-      await afterMutation(item.propertyId, '圖片已儲存');
-    } catch (error) {
-      toast(error.message || '圖片儲存失敗', 'error');
-    }
-  });
-
   $('scanForm').addEventListener('submit', (event) => {
     event.preventDefault();
     lookupScan($('scanCode').value);
@@ -1977,7 +1911,6 @@ function bindEvents() {
       if (el?.tagName === 'FORM') el.reset();
     });
     if ($('scanCode')) $('scanCode').value = '';
-    state.pendingImage = '';
     state.pendingCheckout = null;
     state.returnToDetailId = null;
     clearInventoryCache();

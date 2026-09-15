@@ -1,5 +1,6 @@
 import { startCameraScan, stopCameraScan, parseScanPayload } from './scanner.js';
-import { PRIVACY_NOTICE } from '../services/privacy.js';
+import { categoryIcon } from './format.js';
+import { PRIVACY_NOTICE, collapse, validateName, validatePhone, validateUnit } from '../services/privacy.js';
 import {
   cancelReservation,
   listGuestAssets,
@@ -12,12 +13,15 @@ import {
 const MODE_LABEL = {
   reserve: '我要預借',
   borrow: '我要借用',
-  return: '我要歸還'
+  return: '我要歸還',
+  lookup: '查詢申請'
 };
 
 let mode = 'search';
 let selected = null;
 let cameraOn = false;
+let submitting = false;
+let searchTimer = 0;
 
 function $(id) {
   return document.getElementById(id);
@@ -35,6 +39,43 @@ function showMessage(text, kind = '') {
   el.hidden = !text;
   el.dataset.kind = kind;
   el.textContent = text || '';
+}
+
+function clearFieldErrors() {
+  ['portalUnit', 'portalName', 'portalPhone'].forEach((id) => {
+    const input = $(id);
+    const err = $(`${id}Error`);
+    if (input) input.removeAttribute('aria-invalid');
+    if (err) err.textContent = '';
+  });
+}
+
+function setFieldError(id, message) {
+  const input = $(id);
+  const err = $(`${id}Error`);
+  if (input) input.setAttribute('aria-invalid', message ? 'true' : 'false');
+  if (err) err.textContent = message || '';
+}
+
+function validatePortalPerson({ requireUnit = true } = {}) {
+  clearFieldErrors();
+  const checks = [];
+  if (requireUnit) checks.push(['portalUnit', validateUnit($('portalUnit')?.value)]);
+  checks.push(['portalName', validateName($('portalName')?.value)]);
+  checks.push(['portalPhone', validatePhone($('portalPhone')?.value)]);
+  let first = null;
+  for (const [id, message] of checks) {
+    if (message) {
+      setFieldError(id, message);
+      if (!first) first = $(id);
+    }
+  }
+  if (first) {
+    first.focus({ preventScroll: false });
+    first.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    return false;
+  }
+  return true;
 }
 
 function setStep(name) {
@@ -71,14 +112,14 @@ function renderAssets(items) {
   }
   list.innerHTML = items.map((item) => `
     <article class="portal-card">
-      ${item.image ? `<img src="${esc(item.image)}" alt="" />` : '<div class="portal-photo" aria-hidden="true">無圖</div>'}
-      <div>
-        <strong>${esc(item.name)}</strong>
-        <p>${esc(item.propertyId)}</p>
-        <p>${item.available ? '可借用' : '目前不可借用'} · ${esc(item.location || '未填位置')}</p>
+      ${categoryIcon(item.name, item.specification)}
+      <div class="portal-card-body">
+        <strong class="portal-name">${esc(item.name)}</strong>
+        <p class="pid">${esc(item.propertyId)}</p>
+        <p class="portal-meta">${item.available ? '可借用' : '目前不可借用'} · ${esc(item.location || '未填位置')}</p>
         <div class="portal-actions">
-          <button type="button" data-pick="${esc(item.id)}" data-mode="reserve" ${item.available ? '' : 'disabled'}>預借</button>
-          <button type="button" data-pick="${esc(item.id)}" data-mode="borrow" ${item.available ? '' : 'disabled'}>借用</button>
+          <button type="button" class="secondary" data-pick="${esc(item.id)}" data-mode="reserve" ${item.available ? '' : 'disabled'}>預借</button>
+          <button type="button" class="primary" data-pick="${esc(item.id)}" data-mode="borrow" ${item.available ? '' : 'disabled'}>借用</button>
         </div>
       </div>
     </article>
@@ -102,8 +143,15 @@ async function search(query) {
   }
 }
 
+function scheduleSearch(query) {
+  window.clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(() => search(query), 280);
+}
+
 function openForm(next) {
   mode = next;
+  clearFieldErrors();
+  showMessage('');
   $('portalFormTitle').textContent = MODE_LABEL[next] || '借用';
   $('portalPrivacyText').textContent = PRIVACY_NOTICE;
   const reserve = next === 'reserve';
@@ -117,7 +165,7 @@ function openForm(next) {
   $('portalPrivacyWrap').hidden = returning;
   if ($('portalReturnCondition')) $('portalReturnCondition').closest('.field').hidden = next !== 'return';
   if (selected && !returning) {
-    $('portalAssetBox').textContent = `${selected.name}（${selected.propertyId}）· ${selected.location || '未填位置'}`;
+    $('portalAssetBox').innerHTML = `${categoryIcon(selected.name)} <span><strong class="portal-name">${esc(selected.name)}</strong><br><span class="pid">${esc(selected.propertyId)}</span> · ${esc(selected.location || '未填位置')}</span>`;
   }
   setStep('form');
 }
@@ -131,17 +179,11 @@ async function stopPortalCamera() {
 
 export function bindPublicPortal(onStaffLogin) {
   $('staffLoginOpen')?.addEventListener('click', onStaffLogin);
-  $('portalLoginFoot')?.addEventListener('click', onStaffLogin);
   $('portalHomeBorrow')?.addEventListener('click', () => { mode = 'search'; setStep('search'); search(''); });
   $('portalHomeReserve')?.addEventListener('click', () => { mode = 'search'; setStep('search'); search(''); });
   $('portalHomeReturn')?.addEventListener('click', () => openForm('return'));
-  $('portalSearchForm')?.addEventListener('submit', (event) => {
-    event.preventDefault();
-    search($('portalQuery').value);
-  });
-  $('portalBack')?.addEventListener('click', () => { showMessage(''); setStep(mode === 'return' ? 'home' : 'search'); });
-  $('portalFormBack')?.addEventListener('click', () => { showMessage(''); setStep(mode === 'return' ? 'home' : 'search'); });
   $('portalScanBtn')?.addEventListener('click', async () => {
+    setStep('home');
     $('portalCamera').hidden = false;
     cameraOn = true;
     try {
@@ -157,9 +199,29 @@ export function bindPublicPortal(onStaffLogin) {
       showMessage(error.message || '無法開啟相機，請改用財產編號搜尋', 'error');
     }
   });
+  $('portalSearchForm')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    setStep('search');
+    search($('portalQuery').value);
+  });
+  $('portalQuery')?.addEventListener('input', () => {
+    if (document.querySelector('[data-portal-step="search"]')?.hidden === false) {
+      scheduleSearch($('portalQuery').value);
+    }
+  });
+  $('portalBack')?.addEventListener('click', () => { showMessage(''); setStep('home'); });
+  $('portalFormBack')?.addEventListener('click', () => { showMessage(''); setStep(mode === 'return' || mode === 'lookup' ? 'home' : 'search'); });
   $('portalForm')?.addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (submitting) return;
     const btn = $('portalSubmit');
+    const requireUnit = mode !== 'lookup';
+    if (!validatePortalPerson({ requireUnit })) return;
+    if ((mode === 'borrow' || mode === 'reserve') && !selected?.id) {
+      showMessage('請先選擇財產', 'error');
+      return;
+    }
+    submitting = true;
     btn.disabled = true;
     showMessage('');
     const common = {
@@ -206,10 +268,12 @@ export function bindPublicPortal(onStaffLogin) {
         });
         showMessage('歸還申請已送出，請等待經辦人員確認。', 'ok');
         $('portalForm').reset();
+        clearFieldErrors();
       }
     } catch (error) {
       showMessage(error.message || '送出失敗', 'error');
     } finally {
+      submitting = false;
       btn.disabled = false;
     }
   });
@@ -236,12 +300,13 @@ function showIssued(result) {
   $('issuedNumber').textContent = result.requestNumber;
   $('issuedToken').textContent = result.token;
   $('portalForm').reset();
+  clearFieldErrors();
   selected = null;
 }
 
-export async function openPortalFromScan(propertyId) {
+export function openPortalFromScan(code) {
   showPublicPortal();
+  $('portalQuery').value = collapse(code);
   setStep('search');
-  if ($('portalQuery')) $('portalQuery').value = propertyId;
-  await search(propertyId);
+  search(code);
 }

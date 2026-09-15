@@ -7,7 +7,7 @@
  * Does not store plaintext tokens or write full phone numbers into logs.
  */
 
-var VERIFY_FAIL = '借用資料驗證失敗，請確認借用編號、姓名及電話。';
+var VERIFY_FAIL = '借用資料驗證失敗，請確認申請編號、姓名、電話及驗證碼。';
 var failWindow = {};
 
 function publicBody(e) {

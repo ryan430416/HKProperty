@@ -1,5 +1,5 @@
 import catalog from '../data/inventory.json';
-import { AUDIT_STATUS, PLACEHOLDER_IMAGE } from '../js/format.js';
+import { AUDIT_STATUS } from '../js/format.js';
 
 const AUTH_KEY = 'hkp-demo-auth';
 const DATA_KEY = 'hkp-demo-data';
@@ -583,26 +583,6 @@ export function demoSetActive(assetId, isActive) {
   return asset;
 }
 
-export async function demoSavePhoto(assetId, file) {
-  const data = getDemoData();
-  const asset = assetById(data, assetId);
-  if (!asset) throw new Error('找不到財產');
-  const dataUrl = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error('讀取圖片失敗'));
-    reader.readAsDataURL(file);
-  });
-  asset.image = dataUrl;
-  asset.photo = dataUrl;
-  saveData(data);
-  return dataUrl;
-}
-
-export function demoPhotoUrl(row) {
-  return row?.image || row?.photo || PLACEHOLDER_IMAGE;
-}
-
 export function demoUpdateMe(patch) {
   const current = demoProfile();
   if (!current) throw new Error('請先登入');
@@ -627,5 +607,3 @@ export function demoUpdateUser(payload) {
   saveData(data);
   return user;
 }
-
-export { PLACEHOLDER_IMAGE };

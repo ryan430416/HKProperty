@@ -405,6 +405,11 @@ export function exportLoansCsv(rows) {
     '借用編號', '財產名稱', '財產編號', '借用人', '學號或教職員編號', '借用單位',
     '借出時間', '預計歸還時間', '實際歸還時間', '借用用途', '借出方式', '經手人', '借用狀態', '歸還結果', '備註'
   ];
+  const safe = (value) => {
+    let text = String(value ?? '');
+    if (/^[=+\-@]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  };
   const lines = [header, ...rows.map((loan) => [
     loan.id,
     loan.propertyName,
@@ -421,6 +426,6 @@ export function exportLoansCsv(rows) {
     displayLoanStatus(loan),
     loan.returnResult || '',
     loan.note || ''
-  ])].map((cols) => cols.map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`).join(','));
+  ])].map((cols) => cols.map(safe).join(','));
   return `\uFEFF${lines.join('\r\n')}`;
 }
