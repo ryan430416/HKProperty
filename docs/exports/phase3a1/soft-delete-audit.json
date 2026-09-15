@@ -1,9 +1,9 @@
 {
   "totals": {
-    "physical_records": 392,
+    "physical_records": 393,
     "active_not_soft_deleted": 390,
-    "soft_deleted": 2,
-    "tmp_records": 2
+    "soft_deleted": 3,
+    "tmp_records": 3
   },
   "fingerprint": {
     "algorithm": "sha256 of active property_id sorted ascending, joined by \\n",
@@ -36,6 +36,22 @@
       "is_active": false,
       "is_borrowable": false,
       "deleted_at": "2026-09-15 16:49:25.853Z",
+      "availability_status": "available",
+      "relations": {
+        "reservations": 1,
+        "usage_by_asset": 1,
+        "usage_by_note": 0,
+        "operation_logs": 1
+      }
+    },
+    {
+      "property_id": "PROD-SMOKE-TMP-93871461",
+      "id": "j0822gup04ggwij",
+      "name": "Production煙測臨時財產",
+      "enabled": false,
+      "is_active": false,
+      "is_borrowable": false,
+      "deleted_at": "2026-09-15 17:38:06.421Z",
       "availability_status": "available",
       "relations": {
         "reservations": 1,
