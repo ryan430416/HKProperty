@@ -1,0 +1,49 @@
+{
+  "apply": true,
+  "created": [
+    {
+      "name": "hkp_reservations",
+      "id": "pbc_2604740946"
+    },
+    {
+      "name": "hkp_inventory_sessions",
+      "id": "pbc_1630498162"
+    },
+    {
+      "name": "hkp_inventory_records",
+      "id": "pbc_119626777"
+    }
+  ],
+  "updated": [
+    {
+      "name": "hkp_staff_users.role",
+      "values": [
+        "admin",
+        "staff",
+        "service"
+      ],
+      "dryRun": false
+    },
+    {
+      "name": "hkp_assets",
+      "field": "current_location",
+      "dryRun": false
+    },
+    {
+      "name": "hkp_assets",
+      "field": "deleted_at",
+      "dryRun": false
+    },
+    {
+      "name": "hkp_assets",
+      "field": "enabled",
+      "dryRun": false
+    },
+    {
+      "name": "hkp_reservations.rules",
+      "ok": true
+    }
+  ],
+  "skipped": [],
+  "errors": []
+}

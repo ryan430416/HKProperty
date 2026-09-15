@@ -1,0 +1,82 @@
+{
+  "exportedAt": "2026-09-15T13:57:02.401Z",
+  "hkpUsersCount": 4,
+  "hkpStaffUsersCount": 2,
+  "staffSummary": [
+    {
+      "recordId": "fpr1kqiu3hiqmrl",
+      "displayName": "系統管理員",
+      "emailMasked": "hk***@hkproperty.local",
+      "role": "admin",
+      "active": true,
+      "lastLoginAt": null
+    },
+    {
+      "recordId": "tid9bqo44lk8bbf",
+      "displayName": "經辦人員",
+      "emailMasked": "hk***@hkproperty.local",
+      "role": "staff",
+      "active": true,
+      "lastLoginAt": null
+    }
+  ],
+  "hkpUsers": [
+    {
+      "recordId": "he1zzwob4nq9uxd",
+      "displayName": "測試管理者",
+      "emailMasked": "ke***@gmail.com",
+      "role": "admin",
+      "active": true,
+      "duplicateInStaffUsers": false,
+      "staffRecordId": null,
+      "staffRole": null,
+      "lastLoginAt": null,
+      "updated": null,
+      "recommendation": "review_manual_migrate_if_still_needed"
+    },
+    {
+      "recordId": "xuk7fis62zn8noj",
+      "displayName": "正式管理者",
+      "emailMasked": "hk***@hkproperty.local",
+      "role": "admin",
+      "active": true,
+      "duplicateInStaffUsers": true,
+      "staffRecordId": "fpr1kqiu3hiqmrl",
+      "staffRole": "admin",
+      "lastLoginAt": null,
+      "updated": null,
+      "recommendation": "do_not_migrate_duplicate_exists_in_staff"
+    },
+    {
+      "recordId": "44m4xig6t0ak0e8",
+      "displayName": "正式經辦",
+      "emailMasked": "hk***@hkproperty.local",
+      "role": "staff",
+      "active": true,
+      "duplicateInStaffUsers": true,
+      "staffRecordId": "tid9bqo44lk8bbf",
+      "staffRole": "staff",
+      "lastLoginAt": null,
+      "updated": null,
+      "recommendation": "do_not_migrate_duplicate_exists_in_staff"
+    },
+    {
+      "recordId": "lvz41b9rvau8tww",
+      "displayName": "正式借用人",
+      "emailMasked": "hk***@hkproperty.local",
+      "role": "borrower",
+      "active": true,
+      "duplicateInStaffUsers": false,
+      "staffRecordId": null,
+      "staffRole": null,
+      "lastLoginAt": null,
+      "updated": null,
+      "recommendation": "retain_unused_public_no_login"
+    }
+  ],
+  "notes": [
+    "Passwords and tokens are never exported.",
+    "New system login uses only hkp_staff_users.",
+    "Do not delete hkp_users until phase 3 confirmation."
+  ]
+}

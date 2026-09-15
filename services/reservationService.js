@@ -39,17 +39,17 @@ export function mapReservation(row) {
     id: row.reservation_number || row.id,
     assetId,
     propertyId: item?.propertyId || row.property_id || '',
-    propertyName: item?.name || row.property_name || '',
+    propertyName: item?.name || row.property_name || row.expand?.asset?.name || '',
     userId: relationId(row.user) || row.user_id || row.user || '',
-    userName: row.user_name || row.expand?.user?.name || '',
+    userName: row.user_name || row.borrower_name || row.expand?.user?.name || '',
     purpose: row.purpose,
     startAt: row.start_at,
     endAt: row.end_at,
     status: row.status,
     statusLabel: RESERVATION_STATUS_LABEL[row.status] || row.status,
     rejectionReason: row.rejection_reason || '',
-    contact: row.contact || '',
-    note: row.note || '',
+    contact: row.contact || row.borrower_phone || '',
+    note: row.note || row.notes || '',
     approvedAt: row.approved_at,
     convertedLoanId: relationId(row.converted_loan) || ''
   };
@@ -64,8 +64,14 @@ export async function loadReservations() {
     cache = demoReservations().map(mapReservation);
     return cache;
   }
-  const rows = await getFullList(PB.reservations, { sort: '-created' });
-  cache = (Array.isArray(rows) ? rows : []).map(mapReservation);
+  const rows = await getFullList(PB.timeLocks, { sort: '-created', expand: 'asset' });
+  const groups = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const key = row.reservation_number || row.id;
+    if (groups.has(key)) continue;
+    groups.set(key, mapReservation(row));
+  }
+  cache = [...groups.values()];
   return cache;
 }
 

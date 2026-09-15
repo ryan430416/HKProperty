@@ -1,0 +1,11 @@
+{
+  "exportedAt": "2026-09-15T13:57:01.808Z",
+  "assetsTotal": 390,
+  "loanRecordsTotal": 0,
+  "currentLoanNonEmpty": 0,
+  "currentLoanValid": 0,
+  "currentLoanOrphan": 0,
+  "assetsWithBusyAvailability": 0,
+  "busySample": [],
+  "safeToClearCurrentLoanLater": true
+}

@@ -1,0 +1,340 @@
+{
+  "exportedAt": "2026-09-15T13:51:48.393Z",
+  "pocketbaseUrl": "https://db.keson.pro",
+  "totalCollections": 62,
+  "hkpCollectionCount": 18,
+  "hkpAssetsCount": 390,
+  "warning": null,
+  "counts": {
+    "_mfas": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "_otps": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "_externalAuths": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "_authOrigins": {
+      "totalItems": 52,
+      "countError": null,
+      "type": "base"
+    },
+    "_superusers": {
+      "totalItems": 1,
+      "countError": null,
+      "type": "auth"
+    },
+    "sel_submissions": {
+      "totalItems": 82,
+      "countError": null,
+      "type": "base"
+    },
+    "RIDE_DT": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "teaching_record": {
+      "totalItems": 302,
+      "countError": null,
+      "type": "base"
+    },
+    "users": {
+      "totalItems": 30,
+      "countError": null,
+      "type": "auth"
+    },
+    "programs": {
+      "totalItems": 7,
+      "countError": null,
+      "type": "base"
+    },
+    "daily_logs": {
+      "totalItems": 140,
+      "countError": null,
+      "type": "base"
+    },
+    "school_users": {
+      "totalItems": 5,
+      "countError": null,
+      "type": "auth"
+    },
+    "students": {
+      "totalItems": 82,
+      "countError": null,
+      "type": "base"
+    },
+    "rides": {
+      "totalItems": 2,
+      "countError": null,
+      "type": "base"
+    },
+    "bookings": {
+      "totalItems": 1,
+      "countError": null,
+      "type": "base"
+    },
+    "classes": {
+      "totalItems": 30,
+      "countError": null,
+      "type": "base"
+    },
+    "grades": {
+      "totalItems": 5,
+      "countError": null,
+      "type": "base"
+    },
+    "teachers": {
+      "totalItems": 51,
+      "countError": null,
+      "type": "base"
+    },
+    "subjects": {
+      "totalItems": 33,
+      "countError": null,
+      "type": "base"
+    },
+    "teaching_assignments": {
+      "totalItems": 50,
+      "countError": null,
+      "type": "base"
+    },
+    "office_titles": {
+      "totalItems": 40,
+      "countError": null,
+      "type": "base"
+    },
+    "teacher_offices": {
+      "totalItems": 76,
+      "countError": null,
+      "type": "base"
+    },
+    "teacher_leave_requests": {
+      "totalItems": 2,
+      "countError": null,
+      "type": "base"
+    },
+    "teacher_leave_sub_overrides": {
+      "totalItems": 2,
+      "countError": null,
+      "type": "base"
+    },
+    "teacher_event_attendances": {
+      "totalItems": 2,
+      "countError": null,
+      "type": "base"
+    },
+    "semesters": {
+      "totalItems": 1,
+      "countError": null,
+      "type": "base"
+    },
+    "timetable_slots": {
+      "totalItems": 587,
+      "countError": null,
+      "type": "base"
+    },
+    "teacher_availability": {
+      "totalItems": 14,
+      "countError": null,
+      "type": "base"
+    },
+    "hk_staff_users": {
+      "totalItems": 3,
+      "countError": null,
+      "type": "auth"
+    },
+    "hk_students": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "auth"
+    },
+    "hk_forms": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "hk_applications": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "hk_settings": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "hk_events": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "DT_oder": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "HKProperty": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "hkp_users": {
+      "totalItems": 4,
+      "countError": null,
+      "type": "auth"
+    },
+    "hkp_assets": {
+      "totalItems": 390,
+      "countError": null,
+      "type": "base"
+    },
+    "hkp_loan_records": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "hkp_usage_records": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "hkp_inventory_audits": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "hkp_location_history": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "hkp_operation_logs": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "hkp_system_settings": {
+      "totalItems": 1,
+      "countError": null,
+      "type": "base"
+    },
+    "oder_users": {
+      "totalItems": 15,
+      "countError": null,
+      "type": "auth"
+    },
+    "stores": {
+      "totalItems": 2,
+      "countError": null,
+      "type": "base"
+    },
+    "products": {
+      "totalItems": 4,
+      "countError": null,
+      "type": "base"
+    },
+    "orders": {
+      "totalItems": 1,
+      "countError": null,
+      "type": "base"
+    },
+    "order_items": {
+      "totalItems": 1,
+      "countError": null,
+      "type": "base"
+    },
+    "notifications": {
+      "totalItems": 1,
+      "countError": null,
+      "type": "base"
+    },
+    "reviews": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "admin_audit_logs": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "hkp_usage_counts": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "view"
+    },
+    "hkp_staff_users": {
+      "totalItems": 2,
+      "countError": null,
+      "type": "auth"
+    },
+    "hkp_borrow_requests": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "hkp_assets_guest": {
+      "totalItems": 390,
+      "countError": null,
+      "type": "view"
+    },
+    "hkp_borrow_records": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "hkp_borrow_slots": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "view"
+    },
+    "hkp_borrow_verify": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "view"
+    },
+    "hkp_time_locks": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "base"
+    },
+    "hkp_lock_verify": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "view"
+    },
+    "hkp_lock_public": {
+      "totalItems": 0,
+      "countError": null,
+      "type": "view"
+    }
+  },
+  "hkpNames": [
+    "hkp_assets",
+    "hkp_assets_guest",
+    "hkp_borrow_records",
+    "hkp_borrow_requests",
+    "hkp_borrow_slots",
+    "hkp_borrow_verify",
+    "hkp_inventory_audits",
+    "hkp_loan_records",
+    "hkp_location_history",
+    "hkp_lock_public",
+    "hkp_lock_verify",
+    "hkp_operation_logs",
+    "hkp_staff_users",
+    "hkp_system_settings",
+    "hkp_time_locks",
+    "hkp_usage_counts",
+    "hkp_usage_records",
+    "hkp_users"
+  ]
+}

@@ -981,7 +981,49 @@ form, #historyBody, #detailBody { padding: 12px 18px 18px; }
   font-size: 16px;
   min-height: 44px;
 }
-.portal-results { display: grid; gap: 12px; margin-top: 12px; }
+.portal-manage-open {
+  width: 100%;
+  max-width: 420px;
+  min-height: 48px;
+}
+.portal-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid #d7deea;
+  border-radius: 14px;
+}
+.portal-empty {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  background: #fff;
+  border-radius: 14px;
+  border: 1px dashed #c9d4e3;
+}
+.portal-skeleton .sk-line {
+  height: 12px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #e8eef6, #f7f9fc, #e8eef6);
+  background-size: 200% 100%;
+  animation: portal-shine 1.2s linear infinite;
+  margin-bottom: 8px;
+}
+.portal-skeleton .sk-line.short { width: 42%; }
+.portal-skeleton .sk-line.mid { width: 68%; }
+@keyframes portal-shine {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+.portal-manage {
+  display: grid;
+  gap: 16px;
+  max-width: 720px;
+}
+.portal-manage h3 { margin: 0 0 8px; font-size: 1.05rem; }
 .portal-card {
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr);

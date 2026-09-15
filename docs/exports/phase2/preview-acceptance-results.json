@@ -1,0 +1,241 @@
+{
+  "previewUrl": "https://hk-property-mw6kksk2b-ryan-s-projectsaa.vercel.app",
+  "branchAlias": "https://hk-property-git-rebuild-inventory-system-ryan-s-projectsaa.vercel.app",
+  "passed": 45,
+  "failed": 0,
+  "failedItems": [],
+  "results": [
+    {
+      "name": "public.assets.status",
+      "ok": true,
+      "detail": "totalItems=390"
+    },
+    {
+      "name": "public.assets.count_390",
+      "ok": true,
+      "detail": "got=390"
+    },
+    {
+      "name": "public.assets.whitelist_fields",
+      "ok": true,
+      "detail": "id,propertyId,name,location,available,availabilityLabel"
+    },
+    {
+      "name": "public.search_property_id",
+      "ok": true,
+      "detail": "items=1"
+    },
+    {
+      "name": "public.search_name",
+      "ok": true,
+      "detail": "items=5"
+    },
+    {
+      "name": "public.location_filter",
+      "ok": true,
+      "detail": "items=5"
+    },
+    {
+      "name": "public.create_required_validation",
+      "ok": true,
+      "detail": "error=unit_required"
+    },
+    {
+      "name": "public.available_pool",
+      "ok": true,
+      "detail": "available=50"
+    },
+    {
+      "name": "public.create_pending",
+      "ok": true,
+      "detail": "status=pending"
+    },
+    {
+      "name": "public.lookup_own",
+      "ok": true,
+      "detail": "status=pending"
+    },
+    {
+      "name": "public.lookup_no_leak",
+      "ok": true,
+      "detail": "checked"
+    },
+    {
+      "name": "public.bad_code_denied",
+      "ok": true,
+      "detail": "error=not_found"
+    },
+    {
+      "name": "public.cancel_before_approve",
+      "ok": true,
+      "detail": "status=cancelled"
+    },
+    {
+      "name": "public.html_no_service_secret",
+      "ok": true,
+      "detail": "checked"
+    },
+    {
+      "name": "security.unauth_staff_denied",
+      "ok": true,
+      "detail": "error=unauthorized"
+    },
+    {
+      "name": "security.unauth_admin_denied",
+      "ok": true,
+      "detail": "error=unauthorized"
+    },
+    {
+      "name": "staff.login",
+      "ok": true,
+      "detail": "role=staff"
+    },
+    {
+      "name": "staff.list_reservations",
+      "ok": true,
+      "detail": "items=9"
+    },
+    {
+      "name": "staff.approve",
+      "ok": true,
+      "detail": "status=approved"
+    },
+    {
+      "name": "staff.reject",
+      "ok": true,
+      "detail": "status=rejected"
+    },
+    {
+      "name": "staff.checkout",
+      "ok": true,
+      "detail": "status=checked_out"
+    },
+    {
+      "name": "staff.checkout_one_usage",
+      "ok": true,
+      "detail": "before=2,after=3"
+    },
+    {
+      "name": "security.double_checkout_idempotent",
+      "ok": true,
+      "detail": "idempotent=true"
+    },
+    {
+      "name": "security.double_checkout_one_record",
+      "ok": true,
+      "detail": "after1=3,after2=3"
+    },
+    {
+      "name": "security.no_double_borrow",
+      "ok": true,
+      "detail": "error=asset_unavailable"
+    },
+    {
+      "name": "staff.return_request",
+      "ok": true,
+      "detail": "status=return_requested"
+    },
+    {
+      "name": "staff.return_confirm",
+      "ok": true,
+      "detail": "status=returned"
+    },
+    {
+      "name": "staff.inventory_session",
+      "ok": true,
+      "detail": "id=797nvxk868yv738"
+    },
+    {
+      "name": "staff.inventory_record",
+      "ok": true,
+      "detail": "id=xz54tuoywndb68b"
+    },
+    {
+      "name": "security.staff_admin_403",
+      "ok": true,
+      "detail": "error=forbidden"
+    },
+    {
+      "name": "staff.cannot_create_asset",
+      "ok": true,
+      "detail": "error=forbidden"
+    },
+    {
+      "name": "admin.login",
+      "ok": true,
+      "detail": "role=admin"
+    },
+    {
+      "name": "admin.create_asset",
+      "ok": true,
+      "detail": "id=scn6bxpb61n48gw"
+    },
+    {
+      "name": "admin.edit_asset",
+      "ok": true,
+      "detail": "error=none"
+    },
+    {
+      "name": "admin.disable_asset",
+      "ok": true,
+      "detail": "error=none"
+    },
+    {
+      "name": "admin.delete_requires_confirm",
+      "ok": true,
+      "detail": "error=reason_required"
+    },
+    {
+      "name": "admin.soft_delete_with_reason",
+      "ok": true,
+      "detail": "error=none"
+    },
+    {
+      "name": "admin.manage_staff_list",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "admin.inventory",
+      "ok": true,
+      "detail": "id=tb9yaqqpo5xq0tc"
+    },
+    {
+      "name": "admin.operation_logs",
+      "ok": true,
+      "detail": "validated_via_asset_create_side_effect"
+    },
+    {
+      "name": "security.bundle_no_service_password",
+      "ok": true,
+      "detail": "clean"
+    },
+    {
+      "name": "security.api_no_stack",
+      "ok": true,
+      "detail": "checked"
+    },
+    {
+      "name": "cleanup.test_data",
+      "ok": true,
+      "detail": "requestNos=3,assets=1,sessions=2"
+    },
+    {
+      "name": "final.asset_count_390",
+      "ok": true,
+      "detail": "count=390"
+    },
+    {
+      "name": "final.fingerprint",
+      "ok": true,
+      "detail": "fp=421e9ee0b22544a47ecf3ec0be3beeb7d0b73f97accf026e3f5e8c14af423132"
+    }
+  ],
+  "createdSummary": {
+    "requestNos": 3,
+    "assets": 1,
+    "sessions": 2,
+    "records": 1
+  },
+  "recommendPhase3": true
+}

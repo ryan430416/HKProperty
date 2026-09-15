@@ -20,7 +20,7 @@ const pb = new PocketBase('https://db.keson.pro');
 await pb.collection('_superusers').authWithPassword(env.POCKETBASE_ADMIN_EMAIL, env.POCKETBASE_ADMIN_PASSWORD);
 const guest = await pb.collections.getOne('hkp_assets_guest');
 await pb.collections.update(guest.id, {
-  viewQuery: `SELECT id, property_id, name, location, availability_status, is_borrowable, is_active, specification FROM hkp_assets WHERE is_active = true`
+  viewQuery: `SELECT id, property_id, name, location, availability_status, is_borrowable, is_active FROM hkp_assets WHERE is_active = true`
 });
 const assets = await pb.collection('hkp_assets').getList(1, 1);
 const sample = await pb.collection('hkp_assets_guest').getList(1, 1);

@@ -1,6 +1,15 @@
 /// <reference path="../pb_data/types.d.ts" />
 /**
- * HKProperty PocketBase JSVM hooks.
+ * LOCAL / LEGACY hooks only.
+ * Collections here are unprefixed (assets, loan_records, ...).
+ *
+ * DO NOT deploy this file to db.keson.pro.
+ * Production hooks are:
+ *   pb_hooks/hkp_shared.js
+ *   pb_hooks/public_borrow.pb.js
+ *   pb_hooks/staff_borrow.pb.js
+ * See docs/POCKETBASE_HOOKS_DEPLOY.md
+ *
  * Collections: users, assets, loan_records, asset_reservations, usage_records,
  * inventory_audits, location_history, operation_logs, system_settings
  */

@@ -1,0 +1,10 @@
+{
+  "apply": false,
+  "assetsBefore": 390,
+  "assetsAfter": 390,
+  "plannedFromBorrowRequests": 0,
+  "plannedFromTimeLockGroups": 0,
+  "plannedTotal": 0,
+  "created": 0,
+  "note": "dry-run only (set HKP_ALLOW_APPLY=YES and --apply to write)"
+}

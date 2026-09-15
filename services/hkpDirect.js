@@ -140,171 +140,52 @@ function nextLoanNumber(existing) {
   return `${prefix}${String(same.length + 1).padStart(4, '0')}`;
 }
 
-async function createLoan(body) {
-  const client = requireClient();
-  const auth = authRecord();
-  if (!trim(body.borrower_name)) throw new Error('請填寫借用人姓名');
-  if (trim(body.borrower_number).length < 4) throw new Error('學號或教職員編號至少 4 個字元');
-  if (!trim(body.borrower_department)) throw new Error('請填寫借用單位、系所或社團');
-  if (!trim(body.purpose)) throw new Error('請填寫借用用途');
-  if (!body.expected_return_at) throw new Error('請填寫預計歸還日期與時間');
-  const checkoutAt = body.checkout_at || nowIso();
-  if (new Date(body.expected_return_at) < new Date(checkoutAt)) {
-    throw new Error('預計歸還時間不得早於借出時間');
-  }
-  const method = body.checkout_method || 'self_service';
-  if (!isStaff(auth) && method !== 'self_service') throw new Error('借用人只能使用自助借用');
-  const asset = await requireAsset(body.asset_id);
-  const avail = asset.availability_status;
-  if (asset.is_borrowable === false) throw new Error('此財產不可借用');
-  if (avail === 'maintenance') throw new Error('此財產維修中，無法辦理借出');
-  if (avail === 'lost') throw new Error('此財產狀態為異常，無法辦理借出');
-  if (avail === 'checked_out' || avail === 'overdue') throw new Error('此財產目前已借出，不可再次借出');
-  if (avail === 'pending') throw new Error('此財產已有待處理的借用申請');
-  const loans = await client.collection(PB.loans).getFullList({
-    filter: `asset = "${asset.id}" && status != "returned" && status != "rejected" && status != "cancelled"`
-  });
-  if (loans.length) throw new Error('此財產已有未完成的借用紀錄，不可重複借出');
-  const settings = await settingsRecord();
-  const pending = settings.require_loan_approval === true && !isStaff(auth);
-  const borrowerId = isStaff(auth) && trim(body.borrower_id) ? trim(body.borrower_id) : auth.id;
-  const rec = await client.collection(PB.loans).create({
-    loan_number: nextLoanNumber(await client.collection(PB.loans).getFullList({ fields: 'loan_number' })),
-    asset: asset.id,
-    property_id: asset.property_id,
-    property_name: asset.name,
-    borrower: borrowerId,
-    borrower_name: trim(body.borrower_name),
-    borrower_number: trim(body.borrower_number),
-    borrower_department: trim(body.borrower_department),
-    purpose: trim(body.purpose),
-    contact: trim(body.contact),
-    requested_at: nowIso(),
-    checkout_at: pending ? null : checkoutAt,
-    expected_return_at: body.expected_return_at,
-    checkout_condition: trim(body.checkout_condition),
-    checkout_method: method,
-    checkout_operator: pending ? '' : (method === 'self_service' ? '自助借用' : displayName(auth)),
-    status: pending ? 'pending' : 'checked_out',
-    note: trim(body.note)
-  });
-  try {
-    await client.collection(PB.assets).update(asset.id, {
-      availability_status: pending ? 'reserved' : 'checked_out',
-      current_loan: rec.id
-    });
-    if (!pending) {
-      await createUsageRecord(asset, {
-        loan: rec.id,
-        user_name: rec.borrower_name,
-        user_number: rec.borrower_number,
-        department: rec.borrower_department,
-        used_at: checkoutAt,
-        purpose: rec.purpose,
-        note: `借用編號 ${rec.loan_number}`
-      });
-      await syncUsageCount(asset.id);
-    }
-  } catch (error) {
-    await client.collection(PB.loans).update(rec.id, { status: 'cancelled', note: '寫入未完成，已取消' }).catch(() => {});
-    await client.collection(PB.assets).update(asset.id, {
-      availability_status: avail,
-      current_loan: asset.current_loan || null
-    }).catch(() => {});
-    throw error;
-  }
-  await logOp(pending ? '借用申請' : '借出', 'loan', rec.id, asset.id, { loan_number: rec.loan_number });
-  return rec;
+async function createLoan(_body) {
+  // Phase 2: stop writing hkp_loan_records. Use /api/staff/checkout on hkp_reservations.
+  throw new Error('舊借出路徑已停用：請改用預借核准後的「確認借出」');
 }
 
-async function completeCheckout(id) {
-  const client = requireClient();
-  const auth = authRecord();
-  if (!isStaff(auth)) throw new Error('沒有借出權限');
-  const rec = await client.collection(PB.loans).getOne(id);
-  const now = nowIso();
-  const updated = await client.collection(PB.loans).update(id, {
-    status: 'checked_out',
-    checkout_at: now,
-    checkout_operator: displayName(auth)
-  });
-  const assetId = relationId(rec.asset);
-  const asset = await requireAsset(assetId);
-  await client.collection(PB.assets).update(asset.id, {
-    availability_status: 'checked_out',
-    current_loan: rec.id
-  });
-  await createUsageRecord(asset, {
-    loan: rec.id,
-    user_name: rec.borrower_name,
-    user_number: rec.borrower_number,
-    department: rec.borrower_department,
-    used_at: now,
-    purpose: rec.purpose,
-    note: `借用編號 ${rec.loan_number}`
-  });
-  await syncUsageCount(asset.id);
-  await logOp('借出', 'loan', rec.id, asset.id, { loan_number: rec.loan_number });
-  return updated;
+async function completeCheckout(_id) {
+  throw new Error('舊借出路徑已停用：請改用預借核准後的「確認借出」');
 }
 
-async function completeReturn(id, body) {
-  const client = requireClient();
-  const auth = authRecord();
-  const rec = await client.collection(PB.loans).getOne(id);
-  if (rec.returned_at || rec.status === 'returned') throw new Error('此筆借用已完成歸還，不可重複歸還');
-  let result = trim(body.return_result);
-  if (result === '正常') result = '正常歸還';
-  let next = 'available';
-  if (result === '送修') next = 'maintenance';
-  if (result === '遺失') next = 'lost';
-  const updated = await client.collection(PB.loans).update(id, {
-    status: 'returned',
-    returned_at: body.returned_at,
-    return_location: trim(body.return_location),
-    return_result: result,
-    return_condition: trim(body.return_condition),
-    return_operator: rec.checkout_method === 'self_service' && !isStaff(auth) ? '自助歸還' : displayName(auth)
-  });
-  const asset = await requireAsset(relationId(rec.asset));
-  const patch = {
-    availability_status: next,
-    current_loan: null
-  };
-  if (isStaff(auth)) {
-    patch.return_alert = result === '有損壞' ? 'damaged' : result === '配件缺少' ? 'missing_parts' : '';
-  }
-  if (isStaff(auth) && trim(body.return_location) && trim(body.return_location) !== trim(asset.location || '')) {
-    await client.collection(PB.locations).create({
-      asset: asset.id,
-      from_location: asset.location || '',
-      to_location: trim(body.return_location),
-      reason: `歸還後更新存放位置（${result}）`,
-      operator: auth.id,
-      operator_name: displayName(auth)
-    });
-    patch.location = trim(body.return_location);
-  }
-  await client.collection(PB.assets).update(asset.id, patch);
-  await logOp('歸還', 'loan', rec.id, asset.id, { loan_number: rec.loan_number, result });
-  return updated;
+async function completeReturn(_id, _body) {
+  throw new Error('舊歸還路徑已停用：請改用經辦「確認歸還」');
 }
 
-function overlaps(startAt, endAt, otherStart, otherEnd) {
-  return new Date(startAt).getTime() < new Date(otherEnd).getTime()
-    && new Date(endAt).getTime() > new Date(otherStart).getTime();
+function hourSlots(startAt, endAt) {
+  const start = new Date(startAt);
+  const end = new Date(endAt);
+  start.setMinutes(0, 0, 0);
+  const slots = [];
+  for (let t = start.getTime(); t < end.getTime(); t += 3600000) {
+    slots.push(new Date(t).toISOString());
+  }
+  return slots;
 }
 
 async function activeReservationSlots(assetId) {
   const client = requireClient();
   const filter = `asset = "${assetId}" && (status = "pending" || status = "approved")`;
+  return client.collection(PB.lockPublic).getFullList({
+    filter,
+    fields: 'id,asset,slot_start,status'
+  }).catch(() => []);
+}
+
+async function locksByRef(ref) {
+  const client = requireClient();
+  const key = trim(ref);
+  if (!key) return [];
+  const byNumber = await client.collection(PB.timeLocks).getFullList({
+    filter: `reservation_number = "${key}"`
+  }).catch(() => []);
+  if (byNumber.length) return byNumber;
   try {
-    return await client.collection(PB.reservationSlots).getFullList({ filter });
-  } catch (error) {
-    const status = error?.status || error?.data?.code;
-    if (status !== 404) throw error;
-    if (!isStaff()) throw new Error('無法向 PocketBase 查詢預約衝突，已停止送出');
-    return client.collection(PB.reservations).getFullList({ filter });
+    const one = await client.collection(PB.timeLocks).getOne(key);
+    return [one];
+  } catch {
+    return [];
   }
 }
 
@@ -315,124 +196,51 @@ async function createReservation(body) {
   if (!trim(body.purpose)) throw new Error('請填寫預約用途');
   if (!body.start_at || !body.end_at) throw new Error('請填寫預約起迄時間');
   if (new Date(body.end_at) <= new Date(body.start_at)) throw new Error('預約結束時間必須晚於開始時間');
-  if (new Date(body.start_at).getTime() < Date.now() - 60_000) throw new Error('不可預約過去時間');
-  const assetStatus = String(asset.asset_status || '').toLowerCase();
-  if (assetStatus && assetStatus !== 'normal' && assetStatus !== '正常') throw new Error('此財產不是正常狀態，無法預約');
   if (asset.is_borrowable === false) throw new Error('此財產不可借用');
-  if (asset.availability_status === 'maintenance') throw new Error('此財產維修中，無法預約');
-  if (['lost', 'checked_out', 'overdue'].includes(asset.availability_status)) {
+  if (['lost', 'checked_out', 'overdue', 'reserved'].includes(asset.availability_status)) {
     throw new Error('此財產目前不可預約');
   }
-  const existing = await activeReservationSlots(asset.id);
-  if (existing.some((row) => overlaps(body.start_at, body.end_at, row.start_at, row.end_at))) {
-    throw new Error('此時段已有其他待審或已核准的預約');
-  }
-  const day = nowIso().slice(0, 10).replace(/-/g, '');
-  const payload = {
-    reservation_number: `RSV-${day}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+  const blocking = await client.collection(PB.reservations).getList(1, 1, {
+    filter: `asset = "${asset.id}" && (status = "pending" || status = "approved" || status = "checked_out" || status = "return_requested" || status = "overdue")`
+  });
+  if (blocking.totalItems) throw new Error('此財產已有進行中的預借');
+  const requestNo = `RQ-${Date.now().toString(36).toUpperCase()}`;
+  const verification = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+  const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verification));
+  const verificationHash = [...new Uint8Array(hashBuffer)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const row = await client.collection(PB.reservations).create({
+    request_no: requestNo,
+    request_group_no: requestNo,
+    verification_hash: verificationHash,
+    borrower_unit: trim(auth.department) || '櫃台',
+    borrower_name: displayName(auth),
+    borrower_phone: trim(body.contact) || '0000000000',
     asset: asset.id,
-    user: auth.id,
-    user_name: displayName(auth),
-    user_number: auth.school_number || '',
-    department: auth.department || '',
-    property_id: asset.property_id,
-    property_name: asset.name,
     purpose: trim(body.purpose),
-    start_at: body.start_at,
-    end_at: body.end_at,
+    borrow_date: body.start_at,
+    expected_return_date: body.end_at,
     status: 'pending',
-    contact: trim(body.contact),
-    note: trim(body.note)
-  };
-  const optional = ['user_number', 'department'];
-  let rec;
-  let lastError;
-  for (let attempt = 0; attempt < optional.length + 1; attempt += 1) {
-    try {
-      rec = await client.collection(PB.reservations).create(payload);
-      break;
-    } catch (error) {
-      lastError = error;
-      const fields = Object.keys(error?.data?.data || {});
-      const unknown = fields.find((field) => optional.includes(field));
-      if ((error?.status === 400 || error?.data?.code === 400) && unknown) {
-        delete payload[unknown];
-        continue;
-      }
-      throw error;
-    }
-  }
-  if (!rec) throw lastError;
-  await logOp('預約申請', 'reservation', rec.id, asset.id, { reservation_number: rec.reservation_number });
-  return rec;
+    staff_note: trim(body.note)
+  });
+  await client.collection(PB.assets).update(asset.id, { availability_status: 'reserved' }).catch(() => {});
+  await logOp('預約申請', 'reservation', row.id, asset.id, { request_no: requestNo });
+  return { ...row, reservation_number: requestNo, start_at: row.borrow_date, end_at: row.expected_return_date };
 }
 
 async function approveReservation(id) {
-  const client = requireClient();
-  const auth = authRecord();
-  if (!isStaff(auth)) throw new Error('沒有核准預約的權限');
-  const rec = await client.collection(PB.reservations).getOne(id);
-  if (rec.status !== 'pending') throw new Error('僅能核准待審核的預約');
-  const others = await activeReservationSlots(relationId(rec.asset));
-  if (others.some((row) => row.id !== rec.id && overlaps(rec.start_at, rec.end_at, row.start_at, row.end_at))) {
-    throw new Error('此時段已有衝突的預約');
-  }
-  const updated = await client.collection(PB.reservations).update(id, {
-    status: 'approved',
-    approved_by: auth.id,
-    approved_at: nowIso()
-  });
-  return updated;
+  throw new Error('請改用經辦工作台核准（/api/staff/approve）');
 }
 
-async function checkoutReservation(id, body = {}) {
-  const client = requireClient();
-  const auth = authRecord();
-  const rec = await client.collection(PB.reservations).getOne(id);
-  if (rec.status === 'converted' || rec.converted_loan) throw new Error('此預借已轉成借出，不可重複辦理');
-  if (rec.status !== 'approved') throw new Error('僅已核准的預約可辦理借出');
-  if (!isStaff(auth) && relationId(rec.user) !== auth.id) throw new Error('只能辦理自己的預約借出');
-  const asset = await requireAsset(relationId(rec.asset));
-  const number = trim(rec.user_number || body.borrower_number || auth.school_number);
-  if (number.length < 4) throw new Error('找不到借用人的學號或教職員編號，無法轉成借出');
-  const loan = await createLoan({
-    asset_id: asset.id,
-    borrower_id: relationId(rec.user),
-    borrower_name: rec.user_name || displayName(auth),
-    borrower_number: number,
-    borrower_department: trim(rec.department || body.borrower_department || auth.department) || '未填單位',
-    purpose: rec.purpose,
-    expected_return_at: body.expected_return_at || rec.end_at,
-    checkout_method: 'reservation',
-    contact: rec.contact,
-    note: trim(body.note) || trim(rec.note)
-  });
-  const updated = await client.collection(PB.reservations).update(id, {
-    status: 'converted',
-    converted_loan: loan.id
-  });
-  await logOp('預約轉借出', 'reservation', rec.id, asset.id, { loan_number: loan.loan_number });
-  return { ...updated, loan };
+async function checkoutReservation(_id, _body = {}) {
+  throw new Error('請改用經辦工作台確認借出（/api/staff/checkout）');
 }
 
-async function rejectReservation(id, reason) {
-  const client = requireClient();
-  if (!isStaff()) throw new Error('沒有拒絕預約的權限');
-  if (!trim(reason)) throw new Error('請填寫拒絕原因');
-  return client.collection(PB.reservations).update(id, {
-    status: 'rejected',
-    rejection_reason: trim(reason)
-  });
+async function rejectReservation(_id, _reason) {
+  throw new Error('請改用經辦工作台拒絕（/api/staff/reject）');
 }
 
-async function cancelReservation(id) {
-  const client = requireClient();
-  const auth = authRecord();
-  const rec = await client.collection(PB.reservations).getOne(id);
-  if (!isStaff(auth) && relationId(rec.user) !== auth.id) throw new Error('只能取消自己的預借');
-  if (!isStaff(auth) && rec.status !== 'pending') throw new Error('只能取消自己仍在待審核的預借');
-  if (isStaff(auth) && !['pending', 'approved'].includes(rec.status)) throw new Error('此預約目前無法取消');
-  return client.collection(PB.reservations).update(id, { status: 'cancelled' });
+async function cancelReservation(_id) {
+  throw new Error('公開取消請使用申請編號＋驗證碼 API');
 }
 
 async function runHkpDirect(path, body = {}) {
