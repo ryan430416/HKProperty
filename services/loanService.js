@@ -122,7 +122,7 @@ export async function loadSettings() {
     return settings;
   }
   try {
-    const rows = await getFullList(PB.settings, { sort: '-created' });
+    const rows = await getFullList(PB.settings);
     if (rows[0]) settings = rows[0];
   } catch {
     // keep defaults

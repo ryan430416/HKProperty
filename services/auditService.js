@@ -62,7 +62,7 @@ export async function loadLocationHistory() {
     return locationCache;
   }
   try {
-    const rows = await getFullList(PB.locations, { sort: '-created' });
+    const rows = await getFullList(PB.locations);
     locationCache = (rows || []).map((row) => mapLocation(row, getItem(relationId(row.asset))));
   } catch {
     locationCache = [];
