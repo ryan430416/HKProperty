@@ -12,7 +12,7 @@ export default async function handler(req, res) {
   try {
     const { client, user } = await requireAdmin(req.headers.authorization);
     if (req.method === 'GET') {
-      const rows = await client.collection('hkp_staff_users').getFullList({ sort: '-created' });
+      const rows = await client.collection('hkp_staff_users').getFullList();
       return json(res, 200, {
         items: rows
           .filter((r) => r.role !== 'service')

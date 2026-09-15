@@ -10,7 +10,6 @@ export default async function handler(req, res) {
     const url = new URL(req.url, 'http://localhost');
     const status = String(url.searchParams.get('status') || '').trim();
     const query = {
-      sort: '-created',
       expand: 'asset'
     };
     if (status) query.filter = `status = "${status.replace(/"/g, '')}"`;
