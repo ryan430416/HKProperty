@@ -22,18 +22,16 @@ const pb = new PocketBase(env.POCKETBASE_URL || env.VITE_POCKETBASE_URL);
 await pb.collection('hkp_staff_users').authWithPassword(env.POCKETBASE_SERVICE_EMAIL, env.POCKETBASE_SERVICE_PASSWORD);
 
 let updated = 0;
-let page = 1;
 for (;;) {
-  const list = await pb.collection('hkp_assets').getList(page, 100, {
+  const list = await pb.collection('hkp_assets').getList(1, 100, {
     filter: 'enabled = false && is_active = true && (deleted_at = "" || deleted_at = null)',
     fields: 'id,enabled,property_id'
   });
+  if (!list.items.length) break;
   for (const row of list.items) {
     await pb.collection('hkp_assets').update(row.id, { enabled: true });
     updated += 1;
   }
-  if (page >= list.totalPages || list.items.length === 0) break;
-  page += 1;
 }
 
 const check = await pb.collection('hkp_assets').getList(1, 1, {
