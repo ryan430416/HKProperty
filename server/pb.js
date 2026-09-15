@@ -4,7 +4,8 @@ let cached = { token: '', expiresAt: 0, client: null };
 
 export function publicAssetFields(row) {
   const status = String(row.availability_status || '');
-  const enabled = row.enabled !== false && row.is_active !== false && row.deleted_at == null;
+  const deleted = row.deleted_at != null && String(row.deleted_at).trim() !== '';
+  const enabled = row.enabled !== false && row.is_active !== false && !deleted;
   const borrowable = enabled && row.is_borrowable !== false && status === 'available';
   return {
     id: row.id,
