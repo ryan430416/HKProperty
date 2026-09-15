@@ -1,5 +1,5 @@
-import { getServiceClient, publicAssetFields } from '../../server/pb.js';
-import { clientError, clientIp, json, methodNotAllowed, rateLimit, safeError } from '../../server/http.js';
+import { getServiceClient, publicAssetFields } from '../pb.js';
+import { clientError, clientIp, json, methodNotAllowed, rateLimit, safeError } from '../http.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return methodNotAllowed(res);

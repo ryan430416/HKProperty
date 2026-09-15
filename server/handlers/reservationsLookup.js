@@ -1,7 +1,7 @@
-import { getServiceClient, publicAssetFields } from '../../server/pb.js';
-import { clientError, clientIp, json, methodNotAllowed, rateLimit, readJson, safeError } from '../../server/http.js';
-import { hashToken, maskPhone } from '../../server/security.js';
-import { RESERVATION_STATUS_LABEL } from '../../server/status.js';
+import { getServiceClient, publicAssetFields } from '../pb.js';
+import { clientError, clientIp, json, methodNotAllowed, rateLimit, readJson, safeError } from '../http.js';
+import { hashToken, maskPhone } from '../security.js';
+import { RESERVATION_STATUS_LABEL } from '../status.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return methodNotAllowed(res);

@@ -1,6 +1,6 @@
-import { getStaffClient } from '../../server/pb.js';
-import { clientError, json, methodNotAllowed, readJson, safeError } from '../../server/http.js';
-import { INVENTORY_RESULTS, INVENTORY_SESSION_STATUS } from '../../server/status.js';
+import { getStaffClient } from '../pb.js';
+import { clientError, json, methodNotAllowed, readJson, safeError } from '../http.js';
+import { INVENTORY_RESULTS, INVENTORY_SESSION_STATUS } from '../status.js';
 
 export default async function handler(req, res) {
   try {

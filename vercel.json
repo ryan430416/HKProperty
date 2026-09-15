@@ -3,12 +3,14 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/**/*.js": {
-      "includeFiles": "server/**",
+    "api/gateway.js": {
+      "includeFiles": "{server,shared}/**",
       "maxDuration": 15
     }
   },
   "rewrites": [
+    { "source": "/api/gateway", "destination": "/api/gateway" },
+    { "source": "/api/:path*", "destination": "/api/gateway" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

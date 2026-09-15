@@ -1,5 +1,5 @@
-import { requireAdmin } from '../../server/pb.js';
-import { clientError, json, methodNotAllowed, readJson, safeError } from '../../server/http.js';
+import { requireAdmin } from '../pb.js';
+import { clientError, json, methodNotAllowed, readJson, safeError } from '../http.js';
 
 function maskEmail(email) {
   const value = String(email || '');

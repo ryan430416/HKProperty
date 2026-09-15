@@ -1,7 +1,7 @@
-import { getStaffClient } from '../../server/pb.js';
-import { json, methodNotAllowed, safeError } from '../../server/http.js';
-import { RESERVATION_STATUS_LABEL } from '../../server/status.js';
-import { maskPhone } from '../../server/security.js';
+import { getStaffClient } from '../pb.js';
+import { json, methodNotAllowed, safeError } from '../http.js';
+import { RESERVATION_STATUS_LABEL } from '../status.js';
+import { maskPhone } from '../security.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return methodNotAllowed(res);
