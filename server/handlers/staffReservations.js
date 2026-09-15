@@ -9,12 +9,12 @@ export default async function handler(req, res) {
     const { client } = await getStaffClient(req.headers.authorization);
     const url = new URL(req.url, 'http://localhost');
     const status = String(url.searchParams.get('status') || '').trim();
-    const filter = status ? `status = "${status.replace(/"/g, '')}"` : '';
-    const rows = await client.collection('hkp_reservations').getFullList({
-      filter,
+    const query = {
       sort: '-created',
       expand: 'asset'
-    });
+    };
+    if (status) query.filter = `status = "${status.replace(/"/g, '')}"`;
+    const rows = await client.collection('hkp_reservations').getFullList(query);
     return json(res, 200, {
       items: rows.map((row) => ({
         id: row.id,
