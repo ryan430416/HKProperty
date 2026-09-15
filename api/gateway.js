@@ -30,8 +30,16 @@ const routes = new Map([
 ]);
 
 export default async function handler(req, res) {
-  const url = new URL(req.url || '/', 'http://localhost');
+  const headerPath = req.headers['x-forwarded-uri'] || req.headers['x-invoke-path'] || '';
+  const raw = String(headerPath || req.url || '/');
+  const url = new URL(raw, 'http://localhost');
+  // Preserve query string from the inbound request when rewrite strips path-only destination.
+  if (!url.search && req.url && req.url.includes('?')) {
+    url.search = req.url.slice(req.url.indexOf('?'));
+  }
   const pathname = url.pathname.replace(/\/+$/, '') || '/';
+  // Ensure downstream handlers see the original public path + query.
+  req.url = `${pathname}${url.search}`;
   const route = routes.get(pathname);
   if (!route) return clientError(res, 404, 'not_found');
   return route(req, res);

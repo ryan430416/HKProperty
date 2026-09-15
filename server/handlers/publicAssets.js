@@ -13,7 +13,7 @@ export default async function handler(req, res) {
     const perPage = Math.min(50, Math.max(1, Number(url.searchParams.get('perPage') || 20)));
 
     const client = await getServiceClient();
-    const filters = ['deleted_at = "" || deleted_at = null', 'is_active = true'];
+    const filters = ['(deleted_at = "" || deleted_at = null)', 'is_active = true'];
     if (availableOnly) {
       filters.push('availability_status = "available"');
       filters.push('is_borrowable = true');
