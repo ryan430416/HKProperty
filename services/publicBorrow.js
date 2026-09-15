@@ -427,7 +427,8 @@ function maskRow(row) {
 }
 
 function deskOptions(status) {
-  const options = { sort: '-created', expand: 'asset' };
+  // Avoid sort=-created: shared PocketBase rejects it on several hkp_* collections.
+  const options = { expand: 'asset' };
   if (status) options.filter = `status = "${status}"`;
   return options;
 }

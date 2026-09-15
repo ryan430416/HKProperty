@@ -211,7 +211,7 @@ export async function listProfiles() {
   if (!isAdmin()) throw new Error('只有管理者可以管理使用者');
   const client = requireClient();
   try {
-    const data = await client.collection(PB.staffUsers).getFullList({ sort: '-created' });
+    const data = await client.collection(PB.staffUsers).getFullList();
     return Array.isArray(data) ? data.map(mapProfile) : [];
   } catch (error) {
     throw new Error(pbMessage(error, '無法載入使用者'));

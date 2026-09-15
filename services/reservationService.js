@@ -64,7 +64,8 @@ export async function loadReservations() {
     cache = demoReservations().map(mapReservation);
     return cache;
   }
-  const rows = await getFullList(PB.timeLocks, { sort: '-created', expand: 'asset' });
+  // PocketBase shared instance rejects sort=-created on several hkp_* collections.
+  const rows = await getFullList(PB.timeLocks, { expand: 'asset' });
   const groups = new Map();
   for (const row of Array.isArray(rows) ? rows : []) {
     const key = row.reservation_number || row.id;

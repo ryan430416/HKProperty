@@ -159,11 +159,24 @@ button { cursor: pointer; }
   background: #fff;
   border-bottom: 1px solid var(--line);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 12px 24px;
+  max-width: 100%;
+  min-width: 0;
 }
-.topbar-title { min-width: 0; }
+.topbar-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.topbar-title .eyebrow,
+.topbar-title h1 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .eyebrow { color: var(--navy-mid); font-size: 12px; font-weight: 600; }
 .topbar h1 { font-size: 20px; font-weight: 700; }
 .global-search {
@@ -713,9 +726,10 @@ form, #historyBody, #detailBody { padding: 12px 18px 18px; }
   .sidebar.open { transform: none; }
   .shell { margin-left: 0; }
   .menu-btn, .scan-icon, .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; }
-  .admin span:last-child { display: none; }
-  .global-search { order: 5; flex-basis: 100%; max-width: none; margin: 0; }
-  .topbar-title { flex: 1; min-width: 0; }
+  .admin .user-meta { display: none; }
+  .global-search { order: 5; flex: 1 1 100%; max-width: none; margin: 0; }
+  .topbar { padding: 10px 12px; gap: 8px; }
+  .topbar-title { flex: 1 1 auto; min-width: 0; }
   .topbar h1 { font-size: 18px; }
   .pager button { min-width: 44px; min-height: 44px; }
   .rank-row .bar { width: 100%; }

@@ -54,7 +54,7 @@ async function logOp(action, entityType, entityId, assetId, detail) {
 
 async function settingsRecord() {
   const client = requireClient();
-  const rows = await client.collection(PB.settings).getFullList({ sort: '-created' });
+  const rows = await client.collection(PB.settings).getFullList();
   if (!rows[0]) throw new Error('尚未建立系統設定');
   return rows[0];
 }
