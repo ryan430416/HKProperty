@@ -1,0 +1,64 @@
+{
+  "exportedAt": "2026-09-15T14:04:38.776Z",
+  "count": 390,
+  "propertyIdSha256": "421e9ee0b22544a47ecf3ec0be3beeb7d0b73f97accf026e3f5e8c14af423132",
+  "sampleFirst5": [
+    {
+      "id": "8elo2t0x2r5nt2o",
+      "property_id": "1000344000",
+      "availability_status": "available",
+      "is_active": true,
+      "usage_count": 0
+    },
+    {
+      "id": "on8s1irpreap5iz",
+      "property_id": "1000361001",
+      "availability_status": "available",
+      "is_active": true,
+      "usage_count": 0
+    },
+    {
+      "id": "4h55mdwaduec52o",
+      "property_id": "1000361002",
+      "availability_status": "available",
+      "is_active": true,
+      "usage_count": 0
+    },
+    {
+      "id": "hf8o618j661dijk",
+      "property_id": "1000361003",
+      "availability_status": "available",
+      "is_active": true,
+      "usage_count": 0
+    },
+    {
+      "id": "dutphw8jd3l06go",
+      "property_id": "1000361004",
+      "availability_status": "available",
+      "is_active": true,
+      "usage_count": 0
+    }
+  ],
+  "sampleLast5": [
+    {
+      "id": "yfuzgq93x93bbqt",
+      "property_id": "990818001"
+    },
+    {
+      "id": "gfj46pgrhu6llbi",
+      "property_id": "990818002"
+    },
+    {
+      "id": "q8dbbphl6nqq807",
+      "property_id": "990818003"
+    },
+    {
+      "id": "d7c55ebwhbqaige",
+      "property_id": "990818004"
+    },
+    {
+      "id": "f9vr39ce9myobbj",
+      "property_id": "990908000"
+    }
+  ]
+}

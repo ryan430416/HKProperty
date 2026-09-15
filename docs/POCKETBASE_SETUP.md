@@ -132,7 +132,7 @@ POST /api/hkp/public/return
 
 伺服器用 `$security.sha256` 只存雜湊，查詢失敗一律回「借用資料驗證失敗，請確認借用編號、姓名及電話。」同一 IP 10 分鐘內失敗 8 次後拒絕。
 
-安裝：把該檔放到 PocketBase 主機的 `pb_hooks/`，重啟 PocketBase。遠端 `db.keson.pro` 目前沒有這支 Route（實測 HTTP 404）。重啟方式依主機而定，一般是重啟 pocketbase 程序或 `systemctl restart pocketbase`。沒有主機權限就不能安裝。
+安裝：把正式三個檔放到 PocketBase 主機的 `pb_hooks/`，用 `deploy-pocketbase-hooks.sh` 備份、複製、重啟並健康檢查。細節見 `docs/POCKETBASE_HOOKS_DEPLOY.md`。遠端 `db.keson.pro` 在未部署前 Route 會是 HTTP 404。不要部署 `pb_hooks/main.pb.js`（本機舊集合）。重啟方式依主機而定，腳本預設 `systemctl restart pocketbase`。沒有主機權限就不能安裝。
 
 ## 回復
 

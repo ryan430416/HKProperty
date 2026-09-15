@@ -1,0 +1,155 @@
+{
+  "assets": 390,
+  "collections": [
+    {
+      "name": "hkp_assets",
+      "type": "base",
+      "listRule": "(@request.auth.id != \"\" && @request.auth.collectionName = \"hkp_users\" && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\")) || (@request.auth.collectionName = \"hkp_staff_users\" && @request.auth.is_active = true && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\"))",
+      "viewRule": "(@request.auth.id != \"\" && @request.auth.collectionName = \"hkp_users\" && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\")) || (@request.auth.collectionName = \"hkp_staff_users\" && @request.auth.is_active = true && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\"))",
+      "createRule": "@request.auth.role = \"admin\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\"",
+      "updateRule": "(@request.auth.id != \"\" && @request.auth.collectionName = \"hkp_users\" && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\") || (@request.auth.id != \"\" && @request.auth.collectionName = \"hkp_users\" && (\n  @request.body.name:isset = false && @request.body.property_id:isset = false && @request.body.price:isset = false && @request.body.custodian:isset = false && @request.body.supplier:isset = false && @request.body.department:isset = false && @request.body.note:isset = false && @request.body.location:isset = false && @request.body.is_active:isset = false && @request.body.is_borrowable:isset = false && @request.body.photo:isset = false && @request.body.specification:isset = false && @request.body.unit:isset = false && @request.body.brand:isset = false && @request.body.model:isset = false && @request.body.purchase_date:isset = false && @request.body.service_life:isset = false && @request.body.asset_status:isset = false && @request.body.audit_status:isset = false && @request.body.last_audit_at:isset = false && @request.body.return_alert:isset = false && @request.body.usage_count:isset = false && (\n    (availability_status = \"available\" && (@request.body.availability_status = \"checked_out\" || @request.body.availability_status = \"reserved\"))\n    || (current_loan.borrower = @request.auth.id && (@request.body.availability_status = \"available\" || @request.body.availability_status = \"maintenance\" || @request.body.availability_status = \"lost\"))\n  )\n))) || (@request.auth.collectionName = \"hkp_staff_users\" && @request.auth.is_active = true && @request.auth.role = \"admin\" || (@request.auth.collectionName = \"hkp_staff_users\" && @request.auth.is_active = true && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\") && @request.body.name:isset = false && @request.body.property_id:isset = false && @request.body.price:isset = false && @request.body.custodian:isset = false && @request.body.supplier:isset = false && @request.body.department:isset = false && @request.body.note:isset = false && @request.body.location:isset = false && @request.body.is_active:isset = false && @request.body.is_borrowable:isset = false && @request.body.photo:isset = false && @request.body.specification:isset = false && @request.body.unit:isset = false && @request.body.brand:isset = false && @request.body.model:isset = false && @request.body.purchase_date:isset = false && @request.body.service_life:isset = false && @request.body.asset_status:isset = false && @request.body.audit_status:isset = false && @request.body.last_audit_at:isset = false && @request.body.return_alert:isset = false && @request.body.usage_count:isset = false))",
+      "deleteRule": "@request.auth.role = \"admin\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\"",
+      "viewQuery": null
+    },
+    {
+      "name": "hkp_assets_guest",
+      "type": "view",
+      "listRule": "",
+      "viewRule": "",
+      "createRule": null,
+      "updateRule": null,
+      "deleteRule": null,
+      "viewQuery": "SELECT id, property_id, name, location, availability_status, is_borrowable, is_active FROM hkp_assets WHERE is_active = true"
+    },
+    {
+      "name": "hkp_staff_users",
+      "type": "auth",
+      "listRule": "@request.auth.role = \"admin\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\" || id = @request.auth.id",
+      "viewRule": "@request.auth.role = \"admin\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\" || id = @request.auth.id",
+      "createRule": "@request.auth.role = \"admin\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\" && @request.body.role = \"staff\"",
+      "updateRule": "@request.auth.role = \"admin\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\" && (@request.body.role:isset = false || @request.body.role = role) && (id != @request.auth.id || @request.body.active:isset = false)",
+      "deleteRule": null,
+      "viewQuery": null
+    },
+    {
+      "name": "hkp_borrow_requests",
+      "type": "base",
+      "listRule": "@request.auth.role != \"\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\"",
+      "viewRule": "@request.auth.role != \"\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\"",
+      "createRule": "@request.body.status = \"pending\" && @request.body.public_token_hash != \"\" && @request.body.privacy_ack = true && @request.body.asset.availability_status = \"available\"",
+      "updateRule": "(@request.auth.collectionName = \"hkp_staff_users\" && @request.auth.is_active = true && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\") && (\n  @request.body.status:isset = false\n  || (status = \"pending\" && (@request.body.status = \"borrowed\" || @request.body.status = \"rejected\" || @request.body.status = \"cancelled\"))\n  || (status = \"borrowed\" && @request.body.status = \"return_pending\")\n  || (status = \"return_pending\" && @request.body.status = \"returned\")\n)) || (public_token_hash != \"\" && public_token_hash = @request.headers.x_hkp_token && status = \"pending\" && @request.body.status = \"cancelled\") || (public_token_hash != \"\" && public_token_hash = @request.headers.x_hkp_token && borrower_name_hash = @request.headers.x_hkp_name && borrower_phone = @request.headers.x_hkp_phone && status = \"borrowed\" && @request.body.status = \"return_pending\")",
+      "deleteRule": "@request.auth.role = \"admin\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\"",
+      "viewQuery": null
+    },
+    {
+      "name": "hkp_borrow_verify",
+      "type": "view",
+      "listRule": "public_token_hash != \"\" && public_token_hash = @request.headers.x_hkp_token && borrower_name_hash = @request.headers.x_hkp_name && borrower_phone = @request.headers.x_hkp_phone",
+      "viewRule": "public_token_hash != \"\" && public_token_hash = @request.headers.x_hkp_token && borrower_name_hash = @request.headers.x_hkp_name && borrower_phone = @request.headers.x_hkp_phone",
+      "createRule": null,
+      "updateRule": null,
+      "deleteRule": null,
+      "viewQuery": "SELECT id, request_number, status, asset, public_token_hash, borrower_name_hash, borrower_phone FROM hkp_borrow_requests WHERE status = 'borrowed' OR status = 'return_pending'"
+    },
+    {
+      "name": "hkp_borrow_records",
+      "type": "base",
+      "listRule": "@request.auth.role != \"\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\"",
+      "viewRule": "@request.auth.role != \"\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\"",
+      "createRule": "@request.auth.role != \"\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\"",
+      "updateRule": "@request.auth.role != \"\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\"",
+      "deleteRule": "@request.auth.role = \"admin\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\"",
+      "viewQuery": null
+    },
+    {
+      "name": "hkp_borrow_slots",
+      "type": "view",
+      "listRule": "",
+      "viewRule": "",
+      "createRule": null,
+      "updateRule": null,
+      "deleteRule": null,
+      "viewQuery": "SELECT id, asset, status, expected_return_at FROM hkp_borrow_requests WHERE status = 'pending' OR status = 'borrowed' OR status = 'return_pending'"
+    },
+    {
+      "name": "hkp_return_requests",
+      "type": "base",
+      "listRule": "@request.auth.role != \"\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\"",
+      "viewRule": "@request.auth.role != \"\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\"",
+      "createRule": "@request.auth.collectionName = \"hkp_staff_users\" && @request.auth.is_active = true && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\")",
+      "updateRule": "@request.auth.role != \"\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\"",
+      "deleteRule": "@request.auth.role = \"admin\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\"",
+      "viewQuery": null
+    },
+    {
+      "name": "hkp_reservations_v2",
+      "type": "base",
+      "listRule": "@request.auth.role != \"\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\"",
+      "viewRule": "@request.auth.role != \"\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\"",
+      "createRule": "@request.auth.collectionName = \"hkp_staff_users\" && @request.auth.is_active = true && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\")",
+      "updateRule": "@request.auth.role != \"\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\" || (public_token_hash != \"\" && public_token_hash = @request.headers.x_hkp_token && status = \"pending\" && @request.body.status = \"cancelled\")",
+      "deleteRule": "@request.auth.role = \"admin\" && @request.auth.is_active = true && @request.auth.collectionName = \"hkp_staff_users\"",
+      "viewQuery": null
+    },
+    {
+      "name": "hkp_reservation_public",
+      "type": "view",
+      "listRule": "",
+      "viewRule": "",
+      "createRule": null,
+      "updateRule": null,
+      "deleteRule": null,
+      "viewQuery": "SELECT id, asset, start_at, end_at, status FROM hkp_reservations_v2 WHERE status = 'pending' OR status = 'approved'"
+    },
+    {
+      "name": "hkp_time_locks",
+      "type": "base",
+      "listRule": "@request.auth.collectionName = \"hkp_staff_users\" && @request.auth.is_active = true && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\")",
+      "viewRule": "@request.auth.collectionName = \"hkp_staff_users\" && @request.auth.is_active = true && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\")",
+      "createRule": "@request.body.status = \"pending\" && @request.body.public_token_hash != \"\" && @request.body.privacy_ack = true && @request.body.borrower_name_hash != \"\"",
+      "updateRule": "@request.auth.collectionName = \"hkp_staff_users\" && @request.auth.is_active = true && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\") || (public_token_hash != \"\" && public_token_hash = @request.headers.x_hkp_token && borrower_name_hash = @request.headers.x_hkp_name && borrower_phone = @request.headers.x_hkp_phone && status = \"pending\" && @request.body.status = \"cancelled\")",
+      "deleteRule": "@request.auth.collectionName = \"hkp_staff_users\" && @request.auth.is_active = true && @request.auth.role = \"admin\"",
+      "viewQuery": null
+    },
+    {
+      "name": "hkp_lock_public",
+      "type": "view",
+      "listRule": "",
+      "viewRule": "",
+      "createRule": null,
+      "updateRule": null,
+      "deleteRule": null,
+      "viewQuery": "SELECT id, asset, slot_start, status FROM hkp_time_locks WHERE status = 'pending' OR status = 'approved'"
+    },
+    {
+      "name": "hkp_lock_verify",
+      "type": "view",
+      "listRule": "public_token_hash != \"\" && public_token_hash = @request.headers.x_hkp_token && borrower_name_hash = @request.headers.x_hkp_name && borrower_phone = @request.headers.x_hkp_phone",
+      "viewRule": "public_token_hash != \"\" && public_token_hash = @request.headers.x_hkp_token && borrower_name_hash = @request.headers.x_hkp_name && borrower_phone = @request.headers.x_hkp_phone",
+      "createRule": null,
+      "updateRule": null,
+      "deleteRule": null,
+      "viewQuery": "SELECT id, reservation_number, status, public_token_hash, borrower_name_hash, borrower_phone FROM hkp_time_locks WHERE status = 'pending' OR status = 'approved'"
+    },
+    {
+      "name": "hkp_usage_records",
+      "type": "base",
+      "listRule": "(@request.auth.id != \"\" && @request.auth.collectionName = \"hkp_users\" && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\") || created_by = @request.auth.id) || (@request.auth.collectionName = \"hkp_staff_users\" && @request.auth.is_active = true && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\"))",
+      "viewRule": "(@request.auth.id != \"\" && @request.auth.collectionName = \"hkp_users\" && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\") || created_by = @request.auth.id) || (@request.auth.collectionName = \"hkp_staff_users\" && @request.auth.is_active = true && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\"))",
+      "createRule": "(@request.auth.id != \"\" && @request.auth.collectionName = \"hkp_users\" && @request.body.created_by = @request.auth.id) || (@request.auth.collectionName = \"hkp_staff_users\" && @request.auth.is_active = true && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\") && @request.body.created_by:isset = false && @request.body.user:isset = false)",
+      "updateRule": "@request.auth.id != \"\" && @request.auth.collectionName = \"hkp_users\" && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\")",
+      "deleteRule": "@request.auth.id != \"\" && @request.auth.collectionName = \"hkp_users\" && @request.auth.role = \"admin\"",
+      "viewQuery": null
+    },
+    {
+      "name": "hkp_operation_logs",
+      "type": "base",
+      "listRule": "(@request.auth.id != \"\" && @request.auth.collectionName = \"hkp_users\" && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\")) || (@request.auth.collectionName = \"hkp_staff_users\" && @request.auth.is_active = true && @request.auth.role = \"admin\")",
+      "viewRule": "(@request.auth.id != \"\" && @request.auth.collectionName = \"hkp_users\" && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\")) || (@request.auth.collectionName = \"hkp_staff_users\" && @request.auth.is_active = true && @request.auth.role = \"admin\")",
+      "createRule": "(@request.auth.id != \"\" && @request.auth.collectionName = \"hkp_users\") || (@request.auth.collectionName = \"hkp_staff_users\" && @request.auth.is_active = true && (@request.auth.role = \"staff\" || @request.auth.role = \"admin\"))",
+      "updateRule": null,
+      "deleteRule": "@request.auth.id != \"\" && @request.auth.collectionName = \"hkp_users\" && @request.auth.role = \"admin\"",
+      "viewQuery": null
+    }
+  ]
+}

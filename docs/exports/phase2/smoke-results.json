@@ -1,0 +1,71 @@
+{
+  "results": [
+    {
+      "name": "status_pending_to_approved",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "status_block_returned_to_pending",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "assert_checkout_to_returned",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "assertPerson_requires_unit",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "admin_list_assets",
+      "pass": true,
+      "detail": "n=390"
+    },
+    {
+      "name": "service_login_role",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "service_can_list_assets",
+      "pass": true,
+      "detail": "n=390"
+    },
+    {
+      "name": "create_reservation",
+      "pass": true,
+      "detail": "RQ-MU2RURTW-79F90A"
+    },
+    {
+      "name": "checkout_usage_created",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "usage_single_for_idem",
+      "pass": true,
+      "detail": "n=1"
+    },
+    {
+      "name": "return_ok",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "assets_still_390",
+      "pass": true,
+      "detail": "n=390"
+    },
+    {
+      "name": "fingerprint",
+      "pass": true,
+      "detail": "421e9ee0b22544a47ecf3ec0be3beeb7d0b73f97accf026e3f5e8c14af423132"
+    }
+  ],
+  "hash": "421e9ee0b22544a47ecf3ec0be3beeb7d0b73f97accf026e3f5e8c14af423132",
+  "count": 390
+}

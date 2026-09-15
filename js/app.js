@@ -72,7 +72,19 @@ import {
   updateMyProfile
 } from '../services/authService.js';
 import { PB } from '../pocketbase/schema.mjs';
-import { confirmBorrowReturn, confirmCheckout, confirmReturn, listDesk, revealPhone, reviewReservation } from '../services/publicBorrow.js';
+import {
+  inventoryCreateSession,
+  inventoryGetRecords,
+  inventoryListSessions,
+  inventorySaveRecord,
+  staffApprove,
+  staffCheckout,
+  staffListReservations,
+  staffReject,
+  staffReturn
+} from '../services/v2Api.js';
+import { RESERVATION_STATUS } from '../shared/reservationStatus.js';
+import { requireClient } from '../services/pocketbaseClient.js';
 import { maskPhone } from '../services/privacy.js';
 import { bindPublicPortal, hidePublicPortal, openPortalFromScan, showPublicPortal } from './publicPortal.js';
 import {
@@ -101,27 +113,21 @@ import {
   requirePocketBaseReady
 } from '../services/backendStatus.js';
 
-const STAFF_VIEWS = new Set(['staffDesk']);
+const STAFF_VIEWS = new Set(['staffDesk', 'audit']);
 const PAGE_META = {
-  staffDesk: ['借用作業', '借用管理'],
-  dashboard: ['財產管理', '系統總覽'],
-  selfService: ['自助服務', '自助借還'],
-  inventory: ['財產查詢', '財產清冊'],
-  loans: ['借用作業', '借出管理'],
-  loanHistory: ['借用作業', '借用紀錄'],
-  myReservations: ['借用作業', '我的預借'],
-  reservations: ['借用作業', '預借管理'],
-  audit: ['盤點作業', '盤點作業'],
-  usage: ['使用管理', '使用紀錄'],
-  locations: ['位置資料', '位置管理'],
-  logs: ['系統維護', '操作紀錄'],
-  users: ['系統維護', '使用者管理'],
-  settings: ['系統維護', '系統設定']
+  staffDesk: ['經辦工作台', '預借與借還'],
+  dashboard: ['管理工作台', '系統總覽'],
+  inventory: ['財產管理', '財產清冊'],
+  audit: ['財產盤點', '盤點作業'],
+  usage: ['使用紀錄', '使用紀錄'],
+  logs: ['操作紀錄', '操作紀錄'],
+  users: ['經辦人員管理', '帳號管理'],
+  settings: ['資料匯出／設定', '系統設定']
 };
 
 const state = {
   view: 'staffDesk',
-  deskKind: 'borrow',
+  deskKind: 'pending',
   deskStatus: 'pending',
   page: 1,
   auditPage: 1,
@@ -633,27 +639,91 @@ function renderLoanHistory() {
   $('loanHistoryPager').innerHTML = pagerHTML('loanHistory', data);
 }
 
-function renderAuditPage() {
-  const stats = getStats();
-  const percent = stats.total ? Math.round((stats.done / stats.total) * 100) : 0;
-  $('auditSummary').textContent = `已完成 ${stats.done} 件，待盤點 ${stats.pending} 件，完成率 ${percent}%`;
-  $('auditProgressBar').style.width = `${percent}%`;
-  const pending = sortItems(listItems().filter((item) => item.auditStatus === AUDIT_STATUS.PENDING), 'propertyId');
-  const data = paginate(pending, state.auditPage);
-  state.auditPage = data.page;
-  $('auditList').innerHTML = data.rows.length
-    ? `<div class="panel">${data.rows.map((item) => `
-        <div class="audit-item">
-          <div>
-            <strong>${esc(item.name)}</strong>
-            <div class="pid">${esc(item.propertyId)}</div>
-            <div class="muted">登記位置 ${esc(displayValue(item.location))}</div>
+async function renderAuditPage() {
+  const summary = $('auditSummary');
+  const list = $('auditList');
+  const bar = $('auditProgressBar');
+  if (!list) return;
+  if (!isStaff()) {
+    list.innerHTML = '<div class="empty">沒有權限</div>';
+    return;
+  }
+  const token = staffToken();
+  try {
+    const sessions = await inventoryListSessions(token);
+    const open = (sessions.items || []).filter((s) => s.status === 'open');
+    const current = open[0] || (sessions.items || [])[0];
+    if (!current) {
+      if (summary) summary.textContent = '尚無盤點批次';
+      if (bar) bar.style.width = '0%';
+      list.innerHTML = `
+        <div class="panel">
+          <p class="muted">建立盤點批次後，可掃描或輸入財產編號登記結果。借出中財產不會因盤點改為可預借。</p>
+          <button type="button" class="primary" id="auditCreateSession">建立盤點批次</button>
+        </div>`;
+      $('auditCreateSession')?.addEventListener('click', async () => {
+        const title = window.prompt('盤點批次名稱', `盤點 ${new Date().toLocaleDateString('zh-TW')}`);
+        if (!title) return;
+        await inventoryCreateSession(token, title);
+        toast('已建立盤點批次');
+        renderAuditPage();
+      });
+      return;
+    }
+    const detail = await inventoryGetRecords(token, current.id);
+    const s = detail.summary || { assetsTotal: 0, checked: 0, unchecked: 0, abnormal: 0 };
+    const percent = s.assetsTotal ? Math.round((s.checked / s.assetsTotal) * 100) : 0;
+    if (summary) {
+      summary.textContent = `${current.title}｜總數 ${s.assetsTotal}｜已盤 ${s.checked}｜未盤 ${s.unchecked}｜異常 ${s.abnormal}`;
+    }
+    if (bar) bar.style.width = `${percent}%`;
+    list.innerHTML = `
+      <div class="panel">
+        <p class="muted">狀態：${esc(current.status)} · 批次 ID ${esc(current.id)}</p>
+        <form id="inventoryRecordForm" class="portal-form">
+          <div class="field"><label for="invPropertyId">財產編號</label><input id="invPropertyId" required maxlength="40" /></div>
+          <div class="field"><label for="invLocation">實際位置</label><input id="invLocation" required maxlength="80" /></div>
+          <div class="field"><label for="invResult">盤點結果</label>
+            <select id="invResult">
+              <option>正常</option><option>位置不符</option><option>借出中</option>
+              <option>維修中</option><option>遺失</option><option>報廢</option>
+            </select>
           </div>
-          <button type="button" class="primary" data-audit="${esc(item.propertyId)}">執行盤點</button>
-        </div>
-      `).join('')}</div>`
-    : '<div class="empty">目前沒有待盤點財產</div>';
-  $('auditPager').innerHTML = pagerHTML('audit', data);
+          <div class="field"><label for="invNote">備註</label><input id="invNote" maxlength="120" /></div>
+          <button type="submit" class="primary">登錄盤點結果</button>
+        </form>
+      </div>
+      <div class="panel">
+        ${(detail.items || []).slice(0, 30).map((row) => `
+          <div class="audit-item">
+            <div>
+              <strong>${esc(row.name)} · ${esc(row.propertyId)}</strong>
+              <div class="muted">${esc(row.result)} · 帳面 ${esc(row.bookLocation)} → 實際 ${esc(row.recordedLocation)}</div>
+            </div>
+          </div>
+        `).join('') || '<div class="empty">此批次尚無盤點紀錄</div>'}
+      </div>`;
+    $('inventoryRecordForm')?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const propertyId = $('invPropertyId').value.trim();
+      const item = listItems().find((row) => row.propertyId === propertyId);
+      if (!item) {
+        toast('找不到財產編號', 'error');
+        return;
+      }
+      await inventorySaveRecord(token, {
+        sessionId: current.id,
+        assetId: item.id,
+        recordedLocation: $('invLocation').value.trim(),
+        result: $('invResult').value,
+        note: $('invNote').value.trim()
+      });
+      toast('已登錄盤點');
+      renderAuditPage();
+    });
+  } catch (error) {
+    list.innerHTML = `<div class="empty">${esc(error.message)}</div>`;
+  }
 }
 
 function renderUsagePage() {
@@ -731,6 +801,14 @@ async function renderUsers() {
   }
 }
 
+function staffToken() {
+  try {
+    return requireClient().authStore.token || '';
+  } catch {
+    return '';
+  }
+}
+
 async function renderStaffDesk() {
   const list = $('deskList');
   if (!list) return;
@@ -738,19 +816,48 @@ async function renderStaffDesk() {
     list.innerHTML = '<div class="empty">沒有權限</div>';
     return;
   }
+  const token = staffToken();
+  if (!token) {
+    list.innerHTML = '<div class="empty">請重新登入</div>';
+    return;
+  }
   try {
-    const rows = await listDesk(state.deskKind || 'borrow', state.deskStatus || 'pending');
+    const kind = state.deskKind || 'pending';
+    if (kind === 'overview') {
+      const all = await staffListReservations(token, '');
+      const items = all.items || [];
+      const counts = {
+        pending: items.filter((r) => r.status === 'pending').length,
+        approved: items.filter((r) => r.status === 'approved').length,
+        checked_out: items.filter((r) => r.status === 'checked_out' || r.status === 'overdue').length,
+        return_requested: items.filter((r) => r.status === 'return_requested').length
+      };
+      list.innerHTML = `
+        <div class="desk-overview">
+          <p>待確認預借：<strong>${counts.pending}</strong></p>
+          <p>已核准：<strong>${counts.approved}</strong></p>
+          <p>借用中／逾期：<strong>${counts.checked_out}</strong></p>
+          <p>待確認歸還：<strong>${counts.return_requested}</strong></p>
+        </div>`;
+      return;
+    }
+    const status = kind === 'checked_out' ? '' : kind;
+    const payload = await staffListReservations(token, status);
+    let rows = payload.items || [];
+    if (kind === 'checked_out') {
+      rows = rows.filter((r) => r.status === 'checked_out' || r.status === 'overdue');
+    }
     list.innerHTML = rows.length ? rows.map((row) => {
-      const overdue = row.status === 'borrowed' && row.endAt && new Date(row.endAt) < new Date();
+      const overdue = row.status === 'overdue' || (row.status === 'checked_out' && row.expectedReturnDate && new Date(row.expectedReturnDate) < new Date());
       return `<article class="desk-item ${overdue ? 'overdue' : ''}">
-        <strong>${esc(row.number || row.id)} · ${esc(row.assetName || '財產')} ${esc(row.propertyId || '')}</strong>
-        <div>${esc(row.unit)} ${esc(row.name)} · ${esc(row.phoneMasked)} · ${esc(row.status)}${overdue ? ' · 已逾期' : ''}</div>
+        <strong>${esc(row.requestNo)} · ${esc(row.assetName || '財產')} ${esc(row.propertyId || '')}</strong>
+        <div>${esc(row.borrowerUnit)} ${esc(row.borrowerName)} · ${esc(row.phoneMasked)} · ${esc(row.statusLabel)}${overdue ? ' · 已逾期' : ''}</div>
+        <div class="muted">${esc(row.purpose || '')}</div>
         <div class="portal-actions">
-          <button type="button" data-reveal="${esc(row.revealId || row.id)}" data-collection="${esc(row.collectionName || (state.deskKind === 'reservation' ? PB.reservationsV2 : state.deskKind === 'return' ? PB.returnRequests : PB.borrowRequests))}">查看電話</button>
-          ${row.status === 'pending' && state.deskKind === 'reservation' ? `<button type="button" data-approve-res="${esc(row.id)}">核准</button><button type="button" data-reject-res="${esc(row.id)}">拒絕</button>` : ''}
-          ${row.status === 'pending' && state.deskKind !== 'reservation' && state.deskKind !== 'return' ? `<button type="button" data-confirm-out="${esc(row.id)}">確認借出</button>` : ''}
-          ${state.deskKind === 'return' && row.status === 'pending' ? `<button type="button" data-confirm-return="${esc(row.id)}">確認歸還</button>` : ''}
-          ${state.deskKind === 'borrow' && row.status === 'return_pending' ? `<button type="button" data-confirm-borrow-return="${esc(row.id)}">確認歸還</button>` : ''}
+          ${row.status === RESERVATION_STATUS.PENDING ? `<button type="button" data-v2-approve="${esc(row.id)}">核准</button><button type="button" data-v2-reject="${esc(row.id)}">拒絕</button>` : ''}
+          ${row.status === RESERVATION_STATUS.APPROVED ? `<button type="button" data-v2-checkout="${esc(row.id)}">確認借出</button>` : ''}
+          ${row.status === RESERVATION_STATUS.CHECKED_OUT || row.status === RESERVATION_STATUS.OVERDUE ? `<button type="button" data-v2-return-req="${esc(row.id)}">申請歸還</button><button type="button" data-v2-return="${esc(row.id)}">確認歸還</button>` : ''}
+          ${row.status === RESERVATION_STATUS.RETURN_REQUESTED ? `<button type="button" data-v2-return="${esc(row.id)}">確認歸還</button>` : ''}
         </div>
       </article>`;
     }).join('') : '<div class="empty">目前沒有待處理項目</div>';
@@ -1836,27 +1943,34 @@ function bindEvents() {
     const btn = event.target.closest('[data-desk]');
     if (!btn) return;
     state.deskKind = btn.dataset.desk;
-    state.deskStatus = btn.dataset.status;
     renderStaffDesk();
   });
   document.addEventListener('click', async (event) => {
-    const out = event.target.closest('[data-confirm-out]');
-    const approve = event.target.closest('[data-approve-res]');
-    const reject = event.target.closest('[data-reject-res]');
-    const ret = event.target.closest('[data-confirm-return]');
-    const borrowReturn = event.target.closest('[data-confirm-borrow-return]');
-    const reveal = event.target.closest('[data-reveal]');
+    const approve = event.target.closest('[data-v2-approve]');
+    const reject = event.target.closest('[data-v2-reject]');
+    const checkout = event.target.closest('[data-v2-checkout]');
+    const returnReq = event.target.closest('[data-v2-return-req]');
+    const ret = event.target.closest('[data-v2-return]');
     const reset = event.target.closest('[data-reset-user]');
+    const token = staffToken();
     try {
-      if (out) await confirmCheckout(out.dataset.confirmOut);
-      else if (approve) await reviewReservation(approve.dataset.approveRes, 'approve');
-      else if (reject) await reviewReservation(reject.dataset.rejectRes, 'reject');
-      else if (ret) await confirmReturn(ret.dataset.confirmReturn);
-      else if (borrowReturn) await confirmBorrowReturn(borrowReturn.dataset.confirmBorrowReturn);
-      else if (reveal) {
-        const phone = await revealPhone(reveal.dataset.collection, reveal.dataset.reveal);
-        toast(maskPhone(phone) ? `電話 ${phone}` : '沒有電話');
-        return;
+      if (approve) {
+        await staffApprove(token, approve.dataset.v2Approve);
+      } else if (reject) {
+        const reason = window.prompt('拒絕原因', '時段不符') || '';
+        if (!reason) return;
+        await staffReject(token, reject.dataset.v2Reject, reason);
+      } else if (checkout) {
+        await staffCheckout(token, checkout.dataset.v2Checkout, {
+          condition: '現場核對正常',
+          idempotencyKey: checkout.dataset.v2Checkout
+        });
+      } else if (returnReq) {
+        await staffReturn(token, returnReq.dataset.v2ReturnReq, { action: 'request' });
+      } else if (ret) {
+        const condition = window.prompt('歸還物品狀況（必填）', '正常') || '';
+        if (!condition.trim()) return;
+        await staffReturn(token, ret.dataset.v2Return, { action: 'confirm', condition });
       } else if (reset) {
         await requestStaffPasswordReset(reset.dataset.resetUser);
         toast('已送出重設密碼');
@@ -1865,7 +1979,7 @@ function bindEvents() {
       toast('已更新');
       renderStaffDesk();
     } catch (error) {
-      if (out || approve || reject || ret || borrowReturn || reveal || reset) toast(error.message || '操作失敗', 'error');
+      if (approve || reject || checkout || returnReq || ret || reset) toast(error.message || '操作失敗', 'error');
     }
   });
   $('staffCreateForm')?.addEventListener('submit', async (event) => {

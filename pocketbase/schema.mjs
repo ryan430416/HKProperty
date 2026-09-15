@@ -13,28 +13,49 @@ export const PB = {
   users: 'hkp_users',
   staffUsers: 'hkp_staff_users',
   assets: 'hkp_assets',
-  assetsPublic: 'hkp_assets_public',
+  /** @deprecated phase2: frontend must use /api/public/assets */
+  assetsPublic: 'hkp_assets_guest',
+  /** @deprecated phase2: frontend must use /api/public/assets */
   assetsGuest: 'hkp_assets_guest',
   usageCounts: 'hkp_usage_counts',
+  /** @deprecated phase2: stop writing; kept for rollback */
   loans: 'hkp_loan_records',
-  reservations: 'hkp_asset_reservations',
-  reservationsV2: 'hkp_reservations_v2',
-  reservationSlots: 'hkp_reservation_slots',
-  reservationPublic: 'hkp_reservation_public',
+  /** Unified reservations (phase2) */
+  reservations: 'hkp_reservations',
+  /** @deprecated phase2: stop writing new locks */
+  reservationsV2: 'hkp_time_locks',
+  reservationSlots: 'hkp_lock_public',
+  reservationPublic: 'hkp_lock_public',
   timeLocks: 'hkp_time_locks',
   lockPublic: 'hkp_lock_public',
   lockVerify: 'hkp_lock_verify',
+  /** @deprecated phase2: stop writing */
   borrowRequests: 'hkp_borrow_requests',
   borrowVerify: 'hkp_borrow_verify',
   borrowRecords: 'hkp_borrow_records',
   borrowSlots: 'hkp_borrow_slots',
-  returnRequests: 'hkp_return_requests',
+  returnRequests: 'hkp_borrow_requests',
   usage: 'hkp_usage_records',
+  /** @deprecated in favor of inventory_sessions/records */
   audits: 'hkp_inventory_audits',
+  inventorySessions: 'hkp_inventory_sessions',
+  inventoryRecords: 'hkp_inventory_records',
   locations: 'hkp_location_history',
   logs: 'hkp_operation_logs',
   settings: 'hkp_system_settings'
 };
+
+export {
+  RESERVATION_STATUS,
+  RESERVATION_STATUS_LABEL,
+  RESERVATION_STATUSES,
+  canTransition,
+  assertTransition,
+  mapLegacyStatus,
+  INVENTORY_RESULT,
+  INVENTORY_RESULTS,
+  INVENTORY_SESSION_STATUS
+} from '../shared/reservationStatus.js';
 
 export const ROLES = ['borrower', 'staff', 'admin'];
 export const AVAILABILITY = ['available', 'reserved', 'checked_out', 'overdue', 'maintenance', 'lost'];
@@ -42,7 +63,8 @@ export const LOAN_STATUSES = [
   'pending', 'approved', 'checked_out', 'overdue',
   'return_pending', 'returned', 'rejected', 'cancelled'
 ];
-export const RESERVATION_STATUSES = ['pending', 'approved', 'rejected', 'cancelled', 'expired', 'converted'];
+/** @deprecated legacy labels — use shared/reservationStatus.js */
+export const LEGACY_RESERVATION_STATUSES = ['pending', 'approved', 'rejected', 'cancelled', 'expired', 'converted'];
 export const USAGE_TYPES = ['checkout', 'on_site', 'reservation_checkout', 'admin_record'];
 export const RETURN_RESULTS = ['正常歸還', '有損壞', '配件缺少', '送修', '遺失'];
 export const CHECKOUT_METHODS = ['self_service', 'admin', 'reservation'];

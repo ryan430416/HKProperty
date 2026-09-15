@@ -26,24 +26,57 @@ export function mapGuestAsset(row) {
     propertyId: String(row.property_id || ''),
     name: row.name || '',
     location: row.location || '',
-    specification: row.specification || '',
+    specification: '',
     availabilityStatus: status,
     available
   };
 }
 
-export async function listGuestAssets(query = '') {
+export async function listGuestAssets(options = {}) {
   const client = requireClient();
-  const q = collapse(query);
-  const filter = q
-    ? `(property_id ~ {:q} || name ~ {:q}) && is_active != false`
-    : 'is_active != false';
-  const rows = await client.collection(PB.assetsGuest).getList(1, 24, {
-    filter,
-    fields: 'id,property_id,name,location,availability_status,is_borrowable,is_active,specification',
-    ...(q ? { q } : {})
+  const query = collapse(typeof options === 'string' ? options : options.query);
+  const location = collapse(options.location || '');
+  const availability = collapse(options.availability || '');
+  const page = Math.max(1, Number(options.page) || 1);
+  const perPage = Math.min(48, Math.max(1, Number(options.perPage) || 12));
+  const parts = ['is_active != false'];
+  const params = {};
+  if (query) {
+    parts.push('(property_id ~ {:q} || name ~ {:q})');
+    params.q = query;
+  }
+  if (location) {
+    parts.push('location = {:loc}');
+    params.loc = location;
+  }
+  if (availability === 'available') {
+    parts.push('availability_status = "available" && is_borrowable != false');
+  } else if (availability === 'unavailable') {
+    parts.push('(availability_status != "available" || is_borrowable = false)');
+  }
+  const rows = await client.collection(PB.assetsGuest).getList(page, perPage, {
+    filter: parts.join(' && '),
+    sort: 'property_id',
+    fields: 'id,property_id,name,location,availability_status,is_borrowable,is_active',
+    ...params
   });
-  return (rows.items || []).map(mapGuestAsset);
+  return {
+    items: (rows.items || []).map(mapGuestAsset),
+    totalItems: rows.totalItems || 0,
+    page: rows.page || page,
+    perPage: rows.perPage || perPage,
+    totalPages: rows.totalPages || 1
+  };
+}
+
+export async function listGuestLocations() {
+  const client = requireClient();
+  const rows = await client.collection(PB.assetsGuest).getFullList({
+    fields: 'location',
+    filter: 'is_active != false && location != ""'
+  });
+  return [...new Set((rows || []).map((row) => collapse(row.location)).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
 }
 
 async function postPublic(path, body) {
@@ -112,14 +145,7 @@ async function reservationConflict(assetId, startAt, endAt) {
     filter: `asset = "${assetId}" && (status = "pending" || status = "approved")`,
     fields: 'id,slot_start,status'
   }).catch(() => []);
-  if ((locks || []).some((row) => slots.has(row.slot_start))) return true;
-  const rows = await client.collection(PB.reservationPublic).getFullList({
-    filter: `asset = "${assetId}" && (status = "pending" || status = "approved")`,
-    fields: 'id,start_at,end_at,status'
-  }).catch(() => []);
-  const start = new Date(startAt).getTime();
-  const end = new Date(endAt).getTime();
-  return (rows || []).some((row) => start < new Date(row.end_at).getTime() && end > new Date(row.start_at).getTime());
+  return (locks || []).some((row) => slots.has(row.slot_start));
 }
 
 export async function submitBorrow(input) {
@@ -421,27 +447,24 @@ async function listReservationDesk(status) {
       propertyId: row.expand?.asset?.property_id || ''
     });
   }
-  const legacy = await client.collection(PB.reservationsV2).getFullList(deskOptions(status)).catch(() => []);
-  const older = (legacy || []).filter((row) => !groups.has(row.reservation_number)).map((row) => ({
-    ...maskRow(row),
-    revealId: row.id,
-    collectionName: PB.reservationsV2,
-    assetName: row.expand?.asset?.name || '',
-    propertyId: row.expand?.asset?.property_id || ''
-  }));
-  return [...groups.values(), ...older];
+  return [...groups.values()];
 }
 
 export async function listDesk(kind, status) {
   requireDesk();
   if (kind === 'reservation') return listReservationDesk(status);
   const client = requireClient();
-  const collection = kind === 'return' ? PB.returnRequests : PB.borrowRequests;
-  const rows = await client.collection(collection).getFullList(deskOptions(status));
+  const options = deskOptions(status);
+  if (kind === 'return') {
+    // 歸還佇列併入 borrow_requests；櫃台「待處理」對應 return_pending
+    if (!status || status === 'pending') options.filter = 'status = "return_pending"';
+    else if (status === 'confirmed' || status === 'returned') options.filter = 'status = "returned"';
+  }
+  const rows = await client.collection(PB.borrowRequests).getFullList(options);
   return rows.map((row) => ({
     ...maskRow(row),
     revealId: row.id,
-    collectionName: collection,
+    collectionName: PB.borrowRequests,
     assetName: row.expand?.asset?.name || '',
     propertyId: row.expand?.asset?.property_id || ''
   }));
@@ -550,26 +573,22 @@ export async function reviewReservation(id, action, reason = '') {
   lockDesk(id);
   const client = requireClient();
   try {
-    if (String(id).startsWith('RV-')) {
-      const rows = await client.collection(PB.timeLocks).getFullList({
-        filter: `reservation_number = "${id}" && status = "pending"`
-      });
-      if (!rows.length) throw new Error('只能處理待審核預借');
-      const status = action === 'approve' ? 'approved' : 'rejected';
-      for (const row of rows) {
-        const patch = { status };
-        if (status === 'rejected') patch.slot_start = `released:${row.id}`;
-        await client.collection(PB.timeLocks).update(row.id, patch);
-      }
-      return { ok: true, status };
-    }
-    const row = await client.collection(PB.reservationsV2).getOne(id);
-    if (row.status !== 'pending') throw new Error('只能處理待審核預借');
-    const status = action === 'approve' ? 'approved' : 'rejected';
-    return client.collection(PB.reservationsV2).update(id, {
-      status,
-      rejection_reason: status === 'rejected' ? collapse(reason) : ''
+    const routed = await client.send(`/api/hkp/staff/reservation-review`, {
+      method: 'POST',
+      body: { id, action, reason: collapse(reason) }
+    }).catch((error) => error);
+    if (routed && routed.ok) return routed;
+    const rows = await client.collection(PB.timeLocks).getFullList({
+      filter: `reservation_number = "${id}" && status = "pending"`
     });
+    if (!rows.length) throw new Error('只能處理待審核預借');
+    const status = action === 'approve' ? 'approved' : 'rejected';
+    for (const row of rows) {
+      const patch = { status };
+      if (status === 'rejected') patch.slot_start = `released:${row.id}`;
+      await client.collection(PB.timeLocks).update(row.id, patch);
+    }
+    return { ok: true, status };
   } finally {
     deskBusy.delete(id);
   }
@@ -580,6 +599,8 @@ export async function confirmBorrowReturn(id) {
   lockDesk(id);
   const client = requireClient();
   try {
+    const routed = await client.send(`/api/hkp/staff/borrow-return-confirm`, { method: 'POST', body: { id } }).catch((error) => error);
+    if (routed && routed.ok) return routed;
     const borrow = await client.collection(PB.borrowRequests).getOne(id);
     if (borrow.status !== 'return_pending') throw new Error('此筆不是待確認歸還');
     const now = new Date().toISOString();
@@ -615,36 +636,9 @@ export async function confirmBorrowReturn(id) {
   }
 }
 
+/** 舊歸還申請已併入 borrow_requests；保留函式名稱給櫃台 UI。 */
 export async function confirmReturn(id) {
-  requireDesk();
-  lockDesk(id);
-  try {
-  const client = requireClient();
-  const request = await client.collection(PB.returnRequests).getOne(id);
-  if (request.status !== 'pending') throw new Error('此歸還申請已處理');
-  const borrow = await client.collection(PB.borrowRequests).getOne(request.borrow_request);
-  if (borrow.status === 'returned') throw new Error('已歸還紀錄不可再次歸還');
-  const now = new Date().toISOString();
-  await client.collection(PB.borrowRequests).update(borrow.id, { status: 'returned' });
-  const records = await client.collection(PB.borrowRecords).getFullList({
-    filter: `borrow_request = "${borrow.id}" && status != "returned"`
-  });
-  await Promise.all(records.map((record) => client.collection(PB.borrowRecords).update(record.id, {
-    status: 'returned',
-    returned_at: now,
-    return_condition: request.condition || '',
-    returned_by: getProfile()?.id
-  })));
-  if (borrow.asset) {
-    await client.collection(PB.assets).update(borrow.asset, {
-      availability_status: 'available',
-      current_loan: null
-    });
-  }
-  return client.collection(PB.returnRequests).update(id, { status: 'confirmed' });
-  } finally {
-    deskBusy.delete(id);
-  }
+  return confirmBorrowReturn(id);
 }
 
 export function phonesEqual(left, right) {
