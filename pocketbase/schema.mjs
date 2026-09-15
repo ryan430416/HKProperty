@@ -45,7 +45,7 @@ export const PB = {
   settings: 'hkp_system_settings'
 };
 
-export {
+import {
   RESERVATION_STATUS,
   RESERVATION_STATUS_LABEL,
   RESERVATION_STATUSES,
@@ -56,6 +56,18 @@ export {
   INVENTORY_RESULTS,
   INVENTORY_SESSION_STATUS
 } from '../shared/reservationStatus.js';
+
+export {
+  RESERVATION_STATUS,
+  RESERVATION_STATUS_LABEL,
+  RESERVATION_STATUSES,
+  canTransition,
+  assertTransition,
+  mapLegacyStatus,
+  INVENTORY_RESULT,
+  INVENTORY_RESULTS,
+  INVENTORY_SESSION_STATUS
+};
 
 export const ROLES = ['borrower', 'staff', 'admin'];
 export const AVAILABILITY = ['available', 'reserved', 'checked_out', 'overdue', 'maintenance', 'lost'];

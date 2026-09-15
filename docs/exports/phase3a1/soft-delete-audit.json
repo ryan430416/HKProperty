@@ -1,0 +1,53 @@
+{
+  "totals": {
+    "physical_records": 392,
+    "active_not_soft_deleted": 390,
+    "soft_deleted": 2,
+    "tmp_records": 2
+  },
+  "fingerprint": {
+    "algorithm": "sha256 of active property_id sorted ascending, joined by \\n",
+    "filter": "deleted_at empty or null only",
+    "value": "421e9ee0b22544a47ecf3ec0be3beeb7d0b73f97accf026e3f5e8c14af423132",
+    "match_expected": true
+  },
+  "tmp_details": [
+    {
+      "property_id": "PROD-SMOKE-TMP-90736450",
+      "id": "wqwqehymkntf2l0",
+      "name": "Production煙測臨時財產",
+      "enabled": false,
+      "is_active": false,
+      "is_borrowable": false,
+      "deleted_at": "2026-09-15 16:47:54.409Z",
+      "availability_status": "available",
+      "relations": {
+        "reservations": 0,
+        "usage_by_asset": 1,
+        "usage_by_note": 0,
+        "operation_logs": 1
+      }
+    },
+    {
+      "property_id": "PROD-SMOKE-TMP-90948691",
+      "id": "877bqav5mxi9dwr",
+      "name": "Production煙測臨時財產",
+      "enabled": false,
+      "is_active": false,
+      "is_borrowable": false,
+      "deleted_at": "2026-09-15 16:49:25.853Z",
+      "availability_status": "available",
+      "relations": {
+        "reservations": 1,
+        "usage_by_asset": 1,
+        "usage_by_note": 0,
+        "operation_logs": 1
+      }
+    }
+  ],
+  "public_api_tmp_hits": [],
+  "notes": [
+    "Fingerprint excludes soft-deleted rows",
+    "TMP soft-deleted records may remain due to relation constraints; must not be borrowable"
+  ]
+}
