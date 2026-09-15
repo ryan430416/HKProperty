@@ -17,6 +17,7 @@ export default async function handler(req, res) {
     if (availableOnly) {
       filters.push('availability_status = "available"');
       filters.push('is_borrowable = true');
+      filters.push('(enabled = true || enabled = null)');
     }
     if (location) filters.push(`location = "${location.replace(/"/g, '')}"`);
     if (q) {
