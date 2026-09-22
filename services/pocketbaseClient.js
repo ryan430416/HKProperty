@@ -13,7 +13,7 @@ export function getPocketBaseUrl() {
 export function getPocketBaseConfigError() {
   if (!url) return '尚未設定 VITE_POCKETBASE_URL';
   if (import.meta.env.PROD && /localhost|127\.0\.0\.1/i.test(url)) {
-    return `正式環境不可使用本機 PocketBase（目前是 ${url}）。請將 VITE_POCKETBASE_URL 設為 ${DEFAULT_POCKETBASE_URL} 後重新部署。`;
+    return '正式環境不可使用本機 PocketBase。請將 VITE_POCKETBASE_URL 設為正式資料庫網址後重新部署。';
   }
   return null;
 }
@@ -30,10 +30,11 @@ export function requireClient() {
 export function logPocketBaseError(scope, error, extra = {}) {
   const payload = {
     scope,
-    url: pb?.baseUrl || url,
     status: error?.status || error?.data?.code || null,
     message: error?.message || String(error),
-    ...extra
+    ...Object.fromEntries(
+      Object.entries(extra || {}).filter(([key]) => !/pass|token|auth|cookie|secret|phone|email|body/i.test(key))
+    )
   };
   console.error('[HKProperty PocketBase]', payload);
   return payload;

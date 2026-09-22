@@ -1,5 +1,6 @@
-import { requireAdmin } from '../pb.js';
+import { requireAdmin, isSoftDeletedRow } from '../pb.js';
 import { clientError, json, methodNotAllowed, readJson, safeError } from '../http.js';
+import { isTestPropertyId } from '../../shared/assetLifecycle.js';
 
 export default async function handler(req, res) {
   try {
@@ -44,6 +45,9 @@ export default async function handler(req, res) {
     if (req.method === 'PATCH') {
       const body = await readJson(req);
       if (!body.id) return clientError(res, 400, 'id_required');
+      const existing = await client.collection('hkp_assets').getOne(body.id, {
+        fields: 'id,property_id,enabled,deleted_at,is_active'
+      });
       if (body.action === 'soft_delete') {
         if (!String(body.reason || '').trim()) return clientError(res, 400, 'reason_required');
         const updated = await client.collection('hkp_assets').update(body.id, {
@@ -63,6 +67,16 @@ export default async function handler(req, res) {
         }).catch(() => {});
         return json(res, 200, { item: updated });
       }
+      if (body.action === 'hard_delete' || body.action === 'delete') {
+        return clientError(res, 403, 'hard_delete_forbidden');
+      }
+      const restoring = body.enabled === true || body.is_active === true || body.is_borrowable === true;
+      if (restoring && isSoftDeletedRow(existing)) {
+        return clientError(res, 403, 'soft_deleted_restore_forbidden');
+      }
+      if (restoring && isTestPropertyId(existing.property_id)) {
+        return clientError(res, 403, 'test_asset_restore_forbidden');
+      }
       const patch = {};
       for (const [key, field] of Object.entries({
         name: 'name',
@@ -78,6 +92,9 @@ export default async function handler(req, res) {
       }
       const updated = await client.collection('hkp_assets').update(body.id, patch);
       return json(res, 200, { item: updated });
+    }
+    if (req.method === 'DELETE') {
+      return clientError(res, 403, 'hard_delete_forbidden');
     }
     return methodNotAllowed(res);
   } catch (error) {

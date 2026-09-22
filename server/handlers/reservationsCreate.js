@@ -24,6 +24,9 @@ export default async function handler(req, res) {
     });
     const pub = publicAssetFields(asset);
     if (!pub.available) return clientError(res, 409, 'asset_unavailable');
+    if (asset.deleted_at || /^(PROD-SMOKE-TMP-|PREVIEW-TMP-)/i.test(String(asset.property_id || ''))) {
+      return clientError(res, 409, 'asset_unavailable');
+    }
 
     const blocking = await client.collection('hkp_reservations').getList(1, 1, {
       filter: `asset = "${asset.id}" && (status = "pending" || status = "approved" || status = "checked_out" || status = "return_requested" || status = "overdue")`

@@ -973,6 +973,23 @@ form, #historyBody, #detailBody { padding: 12px 18px 18px; }
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
+body.feature-qr-off .portal-action-scan,
+body.feature-qr-off #portalScanBtn,
+body.feature-qr-off #scanBtn,
+body.feature-qr-off #scanBtnMobile,
+body.feature-qr-off #cameraScanBtn,
+body.feature-qr-off #portalStartCamera,
+body.feature-qr-off #scanCameraPanel {
+  display: none !important;
+}
+tr.row-soft-deleted,
+.asset-card.soft-deleted {
+  opacity: 0.72;
+  background: #f7f1f1;
+}
+.asset-card.soft-deleted {
+  border: 1px dashed #c45c5c;
+}
 .portal-action, .portal-form, .portal-issued, .portal-card, .portal-cancel, #staffLoginDialog {
   box-sizing: border-box;
   width: 100%;

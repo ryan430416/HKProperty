@@ -1,5 +1,11 @@
 import { PB } from '../pocketbase/schema.mjs';
 import { AUDIT_STATUS } from '../js/format.js';
+import {
+  assetLifecycle,
+  isOperationalAsset,
+  isSoftDeletedRow,
+  isTestPropertyId
+} from '../shared/assetLifecycle.js';
 import { isDemoMode, isStaff } from './authService.js';
 import { demoAssets, demoSetActive } from './demoStore.js';
 import { hkpPost } from './hkpApi.js';
@@ -25,7 +31,7 @@ export const AVAILABILITY_LABEL = {
   lost: '異常'
 };
 
-const PUBLIC_FIELDS = 'id,property_id,name,location,specification,unit,availability_status,usage_count,is_borrowable,is_active,asset_status,brand,model,audit_status';
+const PUBLIC_FIELDS = 'id,property_id,name,location,specification,unit,availability_status,usage_count,is_borrowable,is_active,enabled,deleted_at,asset_status,brand,model,audit_status';
 const STAFF_FIELDS = `${PUBLIC_FIELDS},department,custodian,price,purchase_date,service_life,supplier,note,current_loan,last_audit_at,return_alert`;
 
 let cache = [];
@@ -40,6 +46,16 @@ export function mapAsset(row) {
   }
   const borrowable = row.borrowable !== false && row.is_borrowable !== false;
   const active = row.active !== false && row.is_active !== false;
+  const softDeleted = isSoftDeletedRow(row);
+  const testAsset = isTestPropertyId(row.property_id);
+  const enabled = row.enabled === true || (row.enabled == null && active);
+  const lifecycle = assetLifecycle({
+    ...row,
+    enabled,
+    is_active: active,
+    property_id: row.property_id,
+    deleted_at: row.deleted_at
+  });
   return {
     id: row.id,
     propertyId: String(row.property_id),
@@ -58,13 +74,27 @@ export function mapAsset(row) {
     note: row.note,
     brand: row.brand,
     model: row.model,
-    isBorrowable: borrowable,
+    isBorrowable: borrowable && !softDeleted && enabled && !testAsset,
     isActive: active,
+    enabled,
+    deletedAt: row.deleted_at || null,
+    isSoftDeleted: softDeleted,
+    isTestAsset: testAsset,
+    lifecycle,
+    isOperational: isOperationalAsset({
+      ...row,
+      enabled,
+      is_active: active,
+      property_id: row.property_id,
+      deleted_at: row.deleted_at
+    }),
     useCount: Number(row.usage_count || 0),
     lastAuditAt: row.last_audit_at || null,
     auditStatus: row.audit_status || AUDIT_STATUS.PENDING,
-    availabilityStatus,
-    availabilityLabel: AVAILABILITY_LABEL[availabilityStatus] || AVAILABILITY_LABEL.available,
+    availabilityStatus: softDeleted ? AVAILABILITY.MAINTENANCE : availabilityStatus,
+    availabilityLabel: softDeleted
+      ? '已軟刪'
+      : (AVAILABILITY_LABEL[availabilityStatus] || AVAILABILITY_LABEL.available),
     currentLoanId: row.current_loan || null,
     returnAlert: row.return_alert || null,
     _raw: row
@@ -74,6 +104,7 @@ export function mapAsset(row) {
 export function setOverdueAssetIds(ids) {
   overdueAssetIds = new Set(ids || []);
   cache = cache.map((item) => {
+    if (item.isSoftDeleted) return item;
     const rawStatus = item.availabilityStatus === AVAILABILITY.OVERDUE ? AVAILABILITY.CHECKED_OUT : item.availabilityStatus;
     const availabilityStatus = rawStatus === AVAILABILITY.CHECKED_OUT && overdueAssetIds.has(item.id)
       ? AVAILABILITY.OVERDUE
@@ -143,18 +174,45 @@ export function isCatalogLoaded() {
   return loaded;
 }
 
-export function listItems() {
-  return Array.isArray(cache) ? cache.slice() : [];
+/**
+ * @param {{ scope?: 'operational' | 'all' | 'active' | 'disabled' | 'soft_deleted' }} [options]
+ * Default scope is operational (formal active assets ≈ 390).
+ */
+export function listItems(options = {}) {
+  const scope = options.scope || 'operational';
+  const all = Array.isArray(cache) ? cache.slice() : [];
+  if (scope === 'all') return all;
+  if (scope === 'soft_deleted') return all.filter((item) => item.isSoftDeleted);
+  if (scope === 'disabled') return all.filter((item) => !item.isSoftDeleted && !item.enabled);
+  if (scope === 'active' || scope === 'operational') return all.filter((item) => item.isOperational);
+  return all.filter((item) => item.isOperational);
 }
 
-export function getItem(propertyId) {
-  if (!Array.isArray(cache)) return null;
+export function listAllItems() {
+  return listItems({ scope: 'all' });
+}
+
+export function getCatalogCounts() {
+  const all = Array.isArray(cache) ? cache : [];
+  return {
+    physical: all.length,
+    active: all.filter((item) => item.isOperational).length,
+    softDeleted: all.filter((item) => item.isSoftDeleted).length,
+    disabled: all.filter((item) => !item.isSoftDeleted && !item.enabled).length
+  };
+}
+
+export function getItem(propertyId, options = {}) {
+  const list = Array.isArray(cache) ? cache : [];
   const id = String(propertyId ?? '').trim();
-  return cache.find((item) => item.propertyId === id || item.id === id) || null;
+  const found = list.find((item) => item.propertyId === id || item.id === id) || null;
+  if (!found) return null;
+  if (options.operationalOnly && !found.isOperational) return null;
+  return found;
 }
 
 export function findByPropertyId(propertyId) {
-  return getItem(propertyId);
+  return getItem(propertyId, { operationalOnly: true });
 }
 
 export function getFilterOptions() {
@@ -185,9 +243,13 @@ export function locationRanking(limit = 0) {
 
 export function getStats() {
   const items = listItems();
+  const counts = getCatalogCounts();
   const auditPending = items.filter((item) => item.auditStatus === AUDIT_STATUS.PENDING).length;
   return {
     total: items.length,
+    physicalTotal: counts.physical,
+    softDeleted: counts.softDeleted,
+    disabled: counts.disabled,
     available: items.filter((item) => item.availabilityStatus === AVAILABILITY.AVAILABLE).length,
     reserved: items.filter((item) => item.availabilityStatus === AVAILABILITY.RESERVED).length,
     approvalPending: items.filter((item) => item.availabilityStatus === AVAILABILITY.RESERVED).length,
@@ -202,6 +264,8 @@ export function getStats() {
 export async function setAssetActive(propertyId, isActive) {
   const item = getItem(propertyId);
   if (!item) throw new Error('找不到財產');
+  if (item.isSoftDeleted) throw new Error('已軟刪財產不可恢復為可借用');
+  if (item.isTestAsset && isActive) throw new Error('測試財產不可恢復為可借用');
   if (isDemoMode()) demoSetActive(item.id, isActive);
   else await hkpPost(`/api/hkproperty/assets/${item.id}/active`, { active: isActive, is_active: isActive });
   await loadCatalog();

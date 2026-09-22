@@ -1,4 +1,5 @@
 import { clientError } from '../server/http.js';
+import { logApiRequest } from '../server/safeLog.js';
 import publicAssets from '../server/handlers/publicAssets.js';
 import reservationsCreate from '../server/handlers/reservationsCreate.js';
 import reservationsLookup from '../server/handlers/reservationsLookup.js';
@@ -31,7 +32,20 @@ const routes = new Map([
   ['/api/admin/operation-logs', adminOperationLogs]
 ]);
 
+function requestId(req) {
+  return String(req.headers['x-vercel-id'] || req.headers['x-request-id'] || '').trim()
+    || `hkp-${Date.now().toString(36)}`;
+}
+
+function roleTypeFromAuth(req) {
+  const auth = String(req.headers.authorization || '');
+  if (!auth) return 'anonymous';
+  return 'authenticated';
+}
+
 export default async function handler(req, res) {
+  const started = Date.now();
+  const rid = requestId(req);
   const headerPath = req.headers['x-forwarded-uri'] || req.headers['x-invoke-path'] || '';
   const raw = String(headerPath || req.url || '/');
   const url = new URL(raw, 'http://localhost');
@@ -43,6 +57,43 @@ export default async function handler(req, res) {
   // Ensure downstream handlers see the original public path + query.
   req.url = `${pathname}${url.search}`;
   const route = routes.get(pathname);
-  if (!route) return clientError(res, 404, 'not_found');
+  if (!route) {
+    logApiRequest({
+      requestId: rid,
+      path: pathname,
+      method: req.method,
+      status: 404,
+      securityCode: 'not_found',
+      durationMs: Date.now() - started,
+      roleType: roleTypeFromAuth(req)
+    });
+    return clientError(res, 404, 'not_found');
+  }
+
+  const originalEnd = res.end.bind(res);
+  res.end = (...args) => {
+    const status = res.statusCode || 200;
+    let securityCode = null;
+    if (status >= 400) {
+      try {
+        const body = args[0];
+        const text = typeof body === 'string' ? body : Buffer.isBuffer(body) ? body.toString('utf8') : '';
+        if (text) securityCode = JSON.parse(text)?.error || `http_${status}`;
+      } catch {
+        securityCode = `http_${status}`;
+      }
+    }
+    logApiRequest({
+      requestId: rid,
+      path: pathname,
+      method: req.method,
+      status,
+      securityCode,
+      durationMs: Date.now() - started,
+      roleType: roleTypeFromAuth(req)
+    });
+    return originalEnd(...args);
+  };
+
   return route(req, res);
 }

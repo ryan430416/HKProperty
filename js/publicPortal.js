@@ -1,5 +1,6 @@
-import { startCameraScan, stopCameraScan, parseScanPayload } from './scanner.js';
+import { startCameraScan, stopCameraScan } from './scanner.js';
 import { categoryIcon } from './format.js';
+import { FEATURES } from '../shared/features.js';
 import { PRIVACY_NOTICE, collapse, validateName, validatePhone, validateUnit } from '../services/privacy.js';
 import {
   cancelReservationApi,
@@ -248,15 +249,22 @@ async function stopPortalCamera() {
 }
 
 async function startPortalCamera() {
+  if (!FEATURES.qrScanner) {
+    showMessage('相機掃描功能暫緩開放，請改以搜尋或手動輸入財產編號', 'error');
+    return;
+  }
   showMessage('');
   $('portalCamera').hidden = false;
   $('portalStopCamera').hidden = false;
   cameraOn = true;
   try {
-    await startCameraScan($('portalCameraVideo'), async (raw) => {
-      const code = parseScanPayload(raw);
-      await stopPortalCamera();
-      openSearch(code);
+    await startCameraScan({
+      videoEl: $('portalCameraVideo'),
+      fallbackContainerId: 'portalCameraFallback',
+      onDetected: async (propertyId) => {
+        await stopPortalCamera();
+        openSearch(propertyId);
+      }
     });
   } catch (error) {
     await stopPortalCamera();
@@ -279,9 +287,14 @@ export function bindPublicPortal(onStaffLogin) {
   $('portalHomeBorrow')?.addEventListener('click', () => openSearch());
   $('portalManageOpen')?.addEventListener('click', () => { showMessage(''); setStep('manage'); });
   $('portalManageBack')?.addEventListener('click', () => { showMessage(''); setStep('home'); });
-  $('portalScanBtn')?.addEventListener('click', () => { showMessage(''); setStep('scan'); });
+  if (FEATURES.qrScanner) {
+    $('portalScanBtn')?.addEventListener('click', () => { showMessage(''); setStep('scan'); });
+    $('portalStartCamera')?.addEventListener('click', () => startPortalCamera());
+  } else if ($('portalScanBtn')) {
+    $('portalScanBtn').hidden = true;
+    $('portalScanBtn').setAttribute('aria-hidden', 'true');
+  }
   $('portalScanBack')?.addEventListener('click', async () => { await stopPortalCamera(); showMessage(''); setStep('home'); });
-  $('portalStartCamera')?.addEventListener('click', () => startPortalCamera());
   $('portalStopCamera')?.addEventListener('click', () => stopPortalCamera());
   $('portalManualScanForm')?.addEventListener('submit', async (event) => {
     event.preventDefault();

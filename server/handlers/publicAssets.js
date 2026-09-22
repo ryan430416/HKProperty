@@ -13,11 +13,16 @@ export default async function handler(req, res) {
     const perPage = Math.min(50, Math.max(1, Number(url.searchParams.get('perPage') || 20)));
 
     const client = await getServiceClient();
-    const filters = ['(deleted_at = "" || deleted_at = null)', 'is_active = true'];
+    const filters = [
+      '(deleted_at = "" || deleted_at = null)',
+      'is_active = true',
+      '(enabled = true || enabled = null)',
+      // Exclude smoke / preview temporary property ids from public catalog.
+      'property_id !~ "PROD-SMOKE-TMP-" && property_id !~ "PREVIEW-TMP-"'
+    ];
     if (availableOnly) {
       filters.push('availability_status = "available"');
       filters.push('is_borrowable = true');
-      filters.push('(enabled = true || enabled = null)');
     }
     if (location) filters.push(`location = "${location.replace(/"/g, '')}"`);
     if (q) {
@@ -31,12 +36,16 @@ export default async function handler(req, res) {
       fields: 'id,property_id,name,location,availability_status,is_borrowable,is_active,enabled,deleted_at'
     });
 
+    const items = list.items
+      .map(publicAssetFields)
+      .filter((item) => item.propertyId && !/^(PROD-SMOKE-TMP-|PREVIEW-TMP-)/i.test(item.propertyId));
+
     return json(res, 200, {
       page: list.page,
       perPage: list.perPage,
       totalItems: list.totalItems,
       totalPages: list.totalPages,
-      items: list.items.map(publicAssetFields)
+      items
     });
   } catch (error) {
     if (String(error?.message || '').includes('service_credentials')) return clientError(res, 503, 'service_unavailable');
