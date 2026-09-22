@@ -24,7 +24,7 @@
     <div data-portal-step="home" class="portal-home">
       <div class="portal-actions-grid">
         <button type="button" class="portal-action" id="portalHomeReserve">預借器材</button>
-        <button type="button" class="portal-action portal-action-scan" id="portalScanBtn">掃描 QR Code</button>
+        <button type="button" class="portal-action portal-action-scan" id="portalScanBtn" hidden>掃描 QR Code</button>
         <button type="button" class="portal-action" id="portalManageOpen">查詢／取消預借</button>
       </div>
       <p class="muted portal-foot">不需註冊或登入。只顯示財產編號、名稱、可預借狀態與取件位置。</p>
@@ -61,8 +61,11 @@
     <div data-portal-step="scan" hidden>
       <button type="button" class="ghost-btn" id="portalScanBack">回首頁</button>
       <h2>掃描財產 QR Code</h2>
-      <p class="muted">按下下方按鈕後才會請求相機權限。無法掃描時可手動輸入財產編號。</p>
-      <div id="portalCamera" hidden><video id="portalCameraVideo" playsinline></video></div>
+      <p class="muted" id="portalScanStepNote">按下下方按鈕後才會請求相機權限。無法掃描時可手動輸入財產編號。</p>
+      <div id="portalCamera" hidden>
+        <video id="portalCameraVideo" playsinline></video>
+        <div id="portalCameraFallback"></div>
+      </div>
       <div class="portal-actions">
         <button type="button" class="primary" id="portalStartCamera">開啟相機掃描</button>
         <button type="button" class="secondary" id="portalStopCamera" hidden>關閉相機</button>
@@ -190,7 +193,7 @@
       <div id="backendStatusBanner" class="backend-status" data-mode="unset" role="status" aria-live="polite">
         <span id="backendStatusText">正在檢查後端連線…</span>
       </div>
-      <div id="demoBanner" class="demo-banner" hidden>測試模式：資料只存在此瀏覽器，不會寫入 PocketBase。</div>
+      <div id="demoBanner" class="demo-banner" hidden>本機演示模式：資料只存在此瀏覽器，不會寫入 PocketBase。</div>
       <header class="topbar">
         <button type="button" class="icon-btn menu-btn" id="menuBtn" aria-label="開啟選單" aria-controls="sidebar">
           <span></span><span></span><span></span>
@@ -557,7 +560,7 @@
             </div>
           </div>
 
-          <p class="ss-foot">目前為功能測試版本，資料僅保存在本次使用的瀏覽器中。</p>
+          <p class="ss-foot">可搜尋財產編號或名稱，查看可預借狀態並提交預借申請。</p>
         </section>
 
         <section class="view" id="view-inventory" hidden aria-label="財產清冊">
@@ -593,6 +596,15 @@
               <label for="filterDept">保管單位</label>
               <select id="filterDept"></select>
             </div>
+            <div class="field" data-admin-col id="filterLifecycleWrap" hidden>
+              <label for="filterLifecycle">財產生命週期</label>
+              <select id="filterLifecycle">
+                <option value="active">使用中</option>
+                <option value="disabled">已停用</option>
+                <option value="soft_deleted">已軟刪</option>
+                <option value="all">全部</option>
+              </select>
+            </div>
             <div class="field">
               <label for="filterSort">排序</label>
               <select id="filterSort">
@@ -606,6 +618,7 @@
               <button type="button" class="secondary" id="clearFilters">清除篩選</button>
             </div>
           </form>
+          <p id="inventoryCountMeta" class="muted" hidden></p>
           <div class="table-wrap" id="inventoryTableWrap">
             <table class="data-table">
               <thead>
@@ -747,7 +760,7 @@
         <section class="view" id="view-audit" hidden aria-label="盤點作業">
           <div class="panel intro-panel">
             <div>
-              <h2>盤點作業</h2>
+              <h2>財產盤點</h2>
               <p id="auditSummary">載入盤點進度中</p>
             </div>
             <div class="progress-track" aria-hidden="true"><i id="auditProgressBar"></i></div>
@@ -820,7 +833,7 @@
           </div>
           <div class="panel" style="margin-top:16px" id="systemSettingsPanel" hidden>
             <h2>借用規則</h2>
-            <p class="muted">測試環境可關閉審核並開放自助借還；正式上線建議開啟審核並關閉自助立即借出。</p>
+            <p class="muted">可調整借用審核與自助借還規則。正式運作建議開啟審核，並依單位政策決定是否開放自助立即借出。</p>
             <form id="systemSettingsForm">
               <label class="choice"><input id="settingRequireApproval" type="checkbox" /> 借用需管理者核准</label>
               <label class="choice"><input id="settingAllowSelf" type="checkbox" /> 允許自助借出與歸還</label>
@@ -834,10 +847,10 @@
             </form>
           </div>
           <div class="panel" style="margin-top:16px">
-            <h2>舊版本機測試資料</h2>
-            <p class="muted">若先前曾用瀏覽器 localStorage 測試，可在此清除。不會上傳舊的姓名、學號或聯絡方式，也不會影響雲端正式資料。</p>
-            <p id="legacyDataText">檢查中…</p>
-            <button type="button" class="danger" id="clearLegacyBtn">清除瀏覽器舊測試資料</button>
+            <h2>瀏覽器本機舊資料</h2>
+            <p class="muted">若先前曾用瀏覽器 localStorage 儲存資料，可在此清除。不會上傳舊的姓名、學號或聯絡方式，也不會影響雲端正式資料。</p>
+            <p id="legacyDataText" class="muted">檢查中…</p>
+            <button type="button" class="danger" id="clearLegacyBtn">清除瀏覽器本機舊資料</button>
           </div>
         </section>
       </main>

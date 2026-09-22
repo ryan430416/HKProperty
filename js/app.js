@@ -17,6 +17,7 @@ import { parseScanPayload, readAssetDeepLink, startCameraScan, stopCameraScan } 
 import {
   AVAILABILITY,
   findByPropertyId,
+  getCatalogCounts,
   getFilterOptions,
   getItem,
   getStats,
@@ -24,6 +25,8 @@ import {
   loadCatalog,
   locationRanking
 } from '../services/inventoryService.js';
+import { FEATURES } from '../shared/features.js';
+import { displayInventorySessionTitle } from '../shared/assetLifecycle.js';
 import { addUsage, listUsage, loadUsage } from '../services/usageService.js';
 import { addAudit, confirmLocationUpdate, listAudits, listLocationChanges, loadAudits, loadLocationHistory } from '../services/auditService.js';
 import {
@@ -119,7 +122,7 @@ const PAGE_META = {
   staffDesk: ['經辦工作台', '預借與借還'],
   dashboard: ['管理工作台', '系統總覽'],
   inventory: ['財產管理', '財產清冊'],
-  audit: ['財產盤點', '盤點作業'],
+  audit: ['財產盤點', '財產盤點'],
   usage: ['使用紀錄', '使用紀錄'],
   logs: ['操作紀錄', '操作紀錄'],
   users: ['經辦人員管理', '帳號管理'],
@@ -202,9 +205,11 @@ function applyRoleNav() {
     const ok = need === 'admin' ? admin : staff;
     el.hidden = !ok;
   });
+  if ($('filterLifecycleWrap')) $('filterLifecycleWrap').hidden = !admin;
+  if ($('inventoryCountMeta')) $('inventoryCountMeta').hidden = !admin;
   const profile = getProfile();
   $('userName').textContent = profile?.display_name || '使用者';
-  $('userRole').textContent = demo ? `${roleLabel(profile?.role)}（測試）` : roleLabel(profile?.role);
+  $('userRole').textContent = demo ? `${roleLabel(profile?.role)}（本機演示）` : roleLabel(profile?.role);
   $('userAvatar').textContent = (profile?.display_name || '用').slice(0, 1);
   $('logoutBtn').hidden = !profile;
   document.body.classList.toggle('borrower-view', Boolean(profile) && !staff);
@@ -225,6 +230,7 @@ function currentFilters() {
     auditStatus: $('filterAudit').value,
     availability: $('filterAvailability').value,
     department: $('filterDept').value,
+    lifecycle: $('filterLifecycle')?.value || 'active',
     sort: $('filterSort').value
   };
 }
@@ -258,9 +264,17 @@ function sortItems(list, sort) {
   return copy;
 }
 
+function inventoryScopeItems(lifecycle) {
+  if (lifecycle === 'all') return listItems({ scope: 'all' });
+  if (lifecycle === 'soft_deleted') return listItems({ scope: 'soft_deleted' });
+  if (lifecycle === 'disabled') return listItems({ scope: 'disabled' });
+  return listItems({ scope: 'active' });
+}
+
 function filteredItems() {
   const filters = currentFilters();
-  return sortItems(listItems().filter((item) => matchesFilters(item, filters)), filters.sort);
+  const base = isAdmin() ? inventoryScopeItems(filters.lifecycle) : listItems({ scope: 'active' });
+  return sortItems(base.filter((item) => matchesFilters(item, filters)), filters.sort);
 }
 
 function paginate(list, page) {
@@ -362,15 +376,20 @@ function feedHTML(rows, emptyText, line) {
 function renderDashboard() {
   const stats = getStats();
   const loanStats = getLoanDashboardStats();
-  $('statGrid').innerHTML = [
-    ['財產總數', stats.total, '件'],
+  const cards = [
+    ['使用中財產', stats.total, '件'],
     ['可借用', stats.available, '件'],
     ['待核准', stats.approvalPending, '件'],
     ['已借出', stats.checkedOut, '件'],
     ['今日應歸還', loanStats.dueToday, '件'],
     ['逾期未還', loanStats.overdue, '件'],
     ['待盤點', stats.pending, '件']
-  ].map(([label, value, unit]) => `
+  ];
+  if (isAdmin()) {
+    cards.push(['已軟刪', stats.softDeleted, '件']);
+    cards.push(['資料庫實體', stats.physicalTotal, '筆']);
+  }
+  $('statGrid').innerHTML = cards.map(([label, value, unit]) => `
     <article class="stat-card"><small>${label}</small><strong>${value}</strong><em>${unit}</em></article>
   `).join('');
 
@@ -426,9 +445,16 @@ function renderInventory() {
     return;
   }
 
+  const lifecycleBadge = (item) => {
+    if (item.isSoftDeleted) return '<span class="badge alert">已軟刪</span>';
+    if (!item.enabled) return '<span class="badge">已停用</span>';
+    if (item.isTestAsset) return '<span class="badge alert">測試財產</span>';
+    return '';
+  };
+
   $('inventoryBody').innerHTML = data.rows.map((item) => `
-    <tr>
-      <td><div class="name-cell">${categoryIcon(item.name, item.specification)}<span class="asset-name">${esc(item.name)}</span></div></td>
+    <tr class="${item.isSoftDeleted ? 'row-soft-deleted' : ''}">
+      <td><div class="name-cell">${categoryIcon(item.name, item.specification)}<span class="asset-name">${esc(item.name)}</span> ${lifecycleBadge(item)}</div></td>
       <td class="pid">${esc(item.propertyId)}</td>
       <td class="wrap-cell">${esc(displayValue(item.location))}</td>
       ${staff ? `<td class="wrap-cell">${esc(displayValue(item.department))}</td>` : ''}
@@ -444,11 +470,11 @@ function renderInventory() {
   `).join('');
 
   $('inventoryCards').innerHTML = data.rows.map((item) => `
-    <article class="asset-card">
+    <article class="asset-card ${item.isSoftDeleted ? 'soft-deleted' : ''}">
       <div class="body">
         <div class="name-cell">${categoryIcon(item.name, item.specification)}<h3 class="asset-name">${esc(item.name)}</h3></div>
         <div class="pid">${esc(item.propertyId)}</div>
-        <div class="meta-row"><span class="wrap-cell">${esc(displayValue(item.location))}</span>${availabilityBadge(item)}</div>
+        <div class="meta-row"><span class="wrap-cell">${esc(displayValue(item.location))}</span>${availabilityBadge(item)} ${lifecycleBadge(item)}</div>
         <div class="meta-row"><span>使用 ${item.useCount} 次</span><span>${esc(displayValue(item.status))}</span></div>
         <div class="card-actions">
           <button type="button" class="link-btn" data-open-item="${esc(item.propertyId)}">查看資料</button>
@@ -457,6 +483,10 @@ function renderInventory() {
     </article>
   `).join('');
   $('inventoryPager').innerHTML = pagerHTML('inventory', data);
+  const counts = getCatalogCounts();
+  if ($('inventoryCountMeta') && isAdmin()) {
+    $('inventoryCountMeta').textContent = `使用中 ${counts.active}｜已軟刪 ${counts.softDeleted}｜實體 ${counts.physical}`;
+  }
 }
 
 function loanRowHTML(loan) {
@@ -675,7 +705,7 @@ async function renderAuditPage() {
     const s = detail.summary || { assetsTotal: 0, checked: 0, unchecked: 0, abnormal: 0 };
     const percent = s.assetsTotal ? Math.round((s.checked / s.assetsTotal) * 100) : 0;
     if (summary) {
-      summary.textContent = `${current.title}｜總數 ${s.assetsTotal}｜已盤 ${s.checked}｜未盤 ${s.unchecked}｜異常 ${s.abnormal}`;
+      summary.textContent = `${displayInventorySessionTitle(current.title)}｜總數 ${s.assetsTotal}｜已盤 ${s.checked}｜未盤 ${s.unchecked}｜異常 ${s.abnormal}`;
     }
     if (bar) bar.style.width = `${percent}%`;
     list.innerHTML = `
@@ -775,8 +805,8 @@ function renderSettings() {
   }
   const legacy = detectLegacyLocalData();
   $('legacyDataText').textContent = legacy.found
-    ? `偵測到舊版測試資料（約 ${(legacy.bytes / 1024).toFixed(1)} KB）。可清除本機資料，不會上傳到雲端。`
-    : '沒有偵測到舊版 localStorage 測試資料。';
+    ? `偵測到瀏覽器本機舊資料（約 ${(legacy.bytes / 1024).toFixed(1)} KB）。可清除本機資料，不會上傳到雲端。`
+    : '沒有偵測到瀏覽器本機舊資料。';
 }
 
 async function renderUsers() {
@@ -1291,12 +1321,29 @@ async function resetScanCameraUi() {
   if ($('scanEngineText')) $('scanEngineText').textContent = '';
 }
 
+function applyFeatureFlags() {
+  const qrOn = FEATURES.qrScanner === true;
+  document.body.classList.toggle('feature-qr-off', !qrOn);
+  ['portalScanBtn', 'scanBtn', 'scanBtnMobile', 'cameraScanBtn', 'portalStartCamera'].forEach((id) => {
+    const el = $(id);
+    if (!el) return;
+    el.hidden = !qrOn;
+    if (!qrOn) el.setAttribute('aria-hidden', 'true');
+    else el.removeAttribute('aria-hidden');
+  });
+  if ($('scanHint') && !qrOn) {
+    $('scanHint').textContent = '請手動輸入財產編號查詢。相機掃描功能暫緩開放。';
+  }
+}
+
 function openScan() {
   resetScanCameraUi();
   $('scanCode').value = '';
   $('scanError').textContent = '';
   if ($('scanHint')) {
-    $('scanHint').textContent = '啟用相機掃描 QR；若拒絕權限，可改以手動輸入財產編號。';
+    $('scanHint').textContent = FEATURES.qrScanner
+      ? '啟用相機掃描 QR；若拒絕權限，可改以手動輸入財產編號。'
+      : '請手動輸入財產編號查詢。相機掃描功能暫緩開放。';
   }
   openExclusiveDialog('scanDialog');
 }
@@ -1584,6 +1631,7 @@ function bindEvents() {
   });
   $('scanBtn').addEventListener('click', openScan);
   $('scanBtnMobile').addEventListener('click', openScan);
+  applyFeatureFlags();
   $('notifyBtn').addEventListener('click', () => {
     const panel = $('notifyPanel');
     panel.hidden = !panel.hidden;
@@ -1621,6 +1669,7 @@ function bindEvents() {
     $('filterAudit').value = '';
     $('filterAvailability').value = '';
     $('filterDept').value = '';
+    if ($('filterLifecycle')) $('filterLifecycle').value = 'active';
     $('filterSort').value = 'propertyId';
     state.page = 1;
     renderInventory();
@@ -1837,6 +1886,11 @@ function bindEvents() {
     lookupScan($('scanCode').value);
   });
   $('cameraScanBtn').addEventListener('click', async () => {
+    if (!FEATURES.qrScanner) {
+      $('scanError').textContent = '相機掃描功能暫緩開放，請改用手動輸入財產編號。';
+      $('scanCode').focus();
+      return;
+    }
     $('scanError').textContent = '';
     try {
       $('scanCameraPanel').hidden = false;
@@ -1913,15 +1967,15 @@ function bindEvents() {
       await enterDemoSession(role);
       markDemoBackend();
       updateBackendStatusUi();
-      toast(role === 'borrower' ? '已進入測試（借用人）' : `已進入測試（${role === 'admin' ? '管理者' : '經辦'}）`);
+      toast(role === 'borrower' ? '已進入本機演示（借用人）' : `已進入本機演示（${role === 'admin' ? '管理者' : '經辦'}）`);
       await bootApp();
     } catch (error) {
-      toast(error.message || '無法進入測試', 'error');
+      toast(error.message || '無法進入本機演示', 'error');
     }
   }
   if (testModeEnabled() && $('testModeEntry')) {
     $('testModeEntry').hidden = false;
-    $('testModeEntry').innerHTML = '<p class="muted">本機測試模式</p><button type="button" class="secondary" id="demoStaffBtn">以經辦人員進入</button><button type="button" class="ghost-btn" id="demoAdminBtn">以管理者進入</button>';
+    $('testModeEntry').innerHTML = '<p class="muted">本機演示模式</p><button type="button" class="secondary" id="demoStaffBtn">以經辦人員進入</button><button type="button" class="ghost-btn" id="demoAdminBtn">以管理者進入</button>';
   }
   $('demoAdminBtn')?.addEventListener('click', () => startDemo('admin'));
   $('demoStaffBtn')?.addEventListener('click', () => startDemo('staff'));
@@ -2072,14 +2126,14 @@ function bindEvents() {
   });
   $('clearLegacyBtn').addEventListener('click', async () => {
     const ok = await confirmAction({
-      title: '清除瀏覽器舊測試資料',
+      title: '清除瀏覽器本機舊資料',
       text: '只會清除此瀏覽器的舊版 localStorage，不會影響雲端資料，也不會上傳舊的姓名或學號。',
       confirmLabel: '確認清除'
     });
     if (!ok) return;
     clearLegacyLocalData();
     renderSettings();
-    toast('已清除本機舊測試資料');
+    toast('已清除瀏覽器本機舊資料');
   });
   $('rejectForm').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -2183,7 +2237,7 @@ async function bootApp() {
     } else {
       setView(isAdmin() ? 'dashboard' : 'staffDesk');
     }
-    toast(`已載入 ${listItems().length} 筆財產`);
+    toast(`已載入 ${listItems().length} 筆使用中財產`);
   } catch (error) {
     showLoadError(error.message || '無法載入資料，請重試。');
     toast(error.message || '載入失敗', 'error');
@@ -2192,6 +2246,7 @@ async function bootApp() {
 
 async function init() {
   bindEvents();
+  applyFeatureFlags();
   $('loadError').hidden = true;
   const pendingDeep = readAssetDeepLink();
   showPublicPortal();

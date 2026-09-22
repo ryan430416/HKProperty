@@ -1,12 +1,12 @@
 import PocketBase from 'pocketbase';
+import { isOperationalAsset, isSoftDeletedRow } from '../shared/assetLifecycle.js';
 
 let cached = { token: '', expiresAt: 0, client: null };
 
 export function publicAssetFields(row) {
   const status = String(row.availability_status || '');
-  const deleted = row.deleted_at != null && String(row.deleted_at).trim() !== '';
-  const enabled = row.enabled !== false && row.is_active !== false && !deleted;
-  const borrowable = enabled && row.is_borrowable !== false && status === 'available';
+  const operational = isOperationalAsset(row);
+  const borrowable = operational && row.is_borrowable !== false && status === 'available';
   return {
     id: row.id,
     propertyId: row.property_id || '',
@@ -16,6 +16,8 @@ export function publicAssetFields(row) {
     availabilityLabel: borrowable ? '可預借' : '目前不可預借'
   };
 }
+
+export { isOperationalAsset, isSoftDeletedRow };
 
 export function getPbUrl() {
   return process.env.POCKETBASE_URL || '';

@@ -42,7 +42,7 @@ export function getAppMode() {
 
 export function appModeCopy(mode = getAppMode()) {
   if (mode === 'official') return 'PocketBase 正式模式';
-  if (mode === 'test') return '測試資料模式，不寫入 PocketBase';
+  if (mode === 'test') return '本機演示模式，不寫入 PocketBase';
   if (mode === 'offline') return 'PocketBase 連線失敗';
   return '正在檢查後端連線';
 }
@@ -171,7 +171,7 @@ export function requirePocketBaseReady() {
 }
 
 export function assertOfficialWrite() {
-  if (inDemoMode()) throw new Error('測試模式不會寫入 PocketBase');
+  if (inDemoMode()) throw new Error('本機演示模式不會寫入 PocketBase');
   if (!pb.authStore.isValid) throw new Error('請先登入');
   if (state.mode !== 'connected') throw new Error('目前不是 PocketBase 正式模式，已停止寫入');
 }

@@ -16,7 +16,7 @@ export default async function handler(req, res) {
         sort: '-checked_at'
       });
       const assetsTotal = (await client.collection('hkp_assets').getList(1, 1, {
-        filter: 'is_active = true && (deleted_at = "" || deleted_at = null)'
+        filter: 'is_active = true && (enabled = true || enabled = null) && (deleted_at = "" || deleted_at = null) && property_id !~ "PROD-SMOKE-TMP-" && property_id !~ "PREVIEW-TMP-"'
       })).totalItems;
       const checked = records.length;
       const abnormal = records.filter((r) => r.result !== '正常').length;
