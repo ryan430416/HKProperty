@@ -157,16 +157,50 @@ async function main() {
       headers: { Authorization: `Bearer ${adminToken}` },
       body: { propertyId: pid, name: 'Production煙測臨時財產', location: 'SMOKE', borrowable: true }
     });
-    const assetId = createdAsset.json?.item?.id;
-    if (assetId) created.assetIds.push(assetId);
-    record('smoke.create_tmp_asset', !!assetId, `id=${assetId || createdAsset.json?.error || 'none'}`);
+    const tmpAssetId = createdAsset.json?.item?.id;
+    if (tmpAssetId) created.assetIds.push(tmpAssetId);
+    record('smoke.create_tmp_asset', !!tmpAssetId, `id=${tmpAssetId || createdAsset.json?.error || 'none'}`);
 
-    if (assetId && staffToken) {
+    // TMP ids must never be publicly reservable after 3A.2 operational filter.
+    if (tmpAssetId) {
+      const tmpDenied = httpJson('POST', '/api/reservations/create', {
+        body: reservationPayload(tmpAssetId)
+      });
+      record(
+        'smoke.tmp_not_reservable',
+        tmpDenied.json?.error === 'asset_unavailable',
+        `error=${tmpDenied.json?.error || 'none'}`
+      );
+    }
+
+    // Formal available asset for main borrow flow (restore to available afterwards).
+    let flowAssetId = '';
+    try {
+      const candidates = await authPb.collection('hkp_assets').getList(1, 30, {
+        filter: 'availability_status = "available" && is_borrowable = true && is_active = true && enabled = true && (deleted_at = "" || deleted_at = null) && property_id !~ "PROD-SMOKE-TMP-" && property_id !~ "PREVIEW-TMP-"',
+        fields: 'id,property_id,name,availability_status,usage_count',
+        sort: 'property_id'
+      });
+      for (const row of candidates.items || []) {
+        const blocking = await authPb.collection('hkp_reservations').getList(1, 1, {
+          filter: `asset = "${row.id}" && (status = "pending" || status = "approved" || status = "checked_out" || status = "return_requested" || status = "overdue")`
+        });
+        if (blocking.totalItems === 0) {
+          flowAssetId = row.id;
+          record('smoke.pick_formal_asset', true, `id=${row.id} pid=${row.property_id}`);
+          break;
+        }
+      }
+      if (!flowAssetId) record('smoke.pick_formal_asset', false, 'no free formal asset');
+    } catch (e) {
+      record('smoke.pick_formal_asset', false, e?.message || 'fail');
+    }
+
+    if (flowAssetId && staffToken) {
       const createdRes = httpJson('POST', '/api/reservations/create', {
-        body: reservationPayload(assetId)
+        body: reservationPayload(flowAssetId)
       });
       const requestNo = createdRes.json?.requestNo;
-      const code = createdRes.json?.verificationCode;
       if (requestNo) created.requestNos.push(requestNo);
       record('smoke.create_reservation', createdRes.json?.status === 'pending', `status=${createdRes.json?.status || createdRes.json?.error}`);
 
@@ -176,14 +210,14 @@ async function main() {
       });
       record('smoke.approve', approve.json?.status === 'approved', `status=${approve.json?.status || approve.json?.error}`);
 
-      const assetBefore = await authPb.collection('hkp_assets').getOne(assetId, { fields: 'id,usage_count' });
+      const assetBefore = await authPb.collection('hkp_assets').getOne(flowAssetId, { fields: 'id,usage_count' });
       created.usageBefore = Number(assetBefore.usage_count || 0);
       const checkout = httpJson('POST', '/api/staff/checkout', {
         headers: { Authorization: `Bearer ${staffToken}` },
         body: { requestNo, condition: '良好', idempotencyKey: `smoke-${requestNo}` }
       });
       record('smoke.checkout', checkout.json?.status === 'checked_out', `status=${checkout.json?.status || checkout.json?.error}`);
-      const assetAfter = await authPb.collection('hkp_assets').getOne(assetId, { fields: 'id,usage_count' });
+      const assetAfter = await authPb.collection('hkp_assets').getOne(flowAssetId, { fields: 'id,usage_count' });
       record('smoke.usage_plus_one', Number(assetAfter.usage_count || 0) === created.usageBefore + 1, `before=${created.usageBefore},after=${assetAfter.usage_count}`);
 
       const retReq = httpJson('POST', '/api/staff/return', {
@@ -196,7 +230,7 @@ async function main() {
         body: { requestNo, action: 'confirm', condition: '良好', note: 'prod-smoke-return' }
       });
       record('smoke.return_confirm', retOk.json?.status === 'returned', `status=${retOk.json?.status || retOk.json?.error}`);
-      const assetFinal = await authPb.collection('hkp_assets').getOne(assetId, { fields: 'id,availability_status' });
+      const assetFinal = await authPb.collection('hkp_assets').getOne(flowAssetId, { fields: 'id,availability_status' });
       record('smoke.asset_available_again', assetFinal.availability_status === 'available', `status=${assetFinal.availability_status}`);
     }
   }
@@ -248,7 +282,7 @@ async function main() {
     failed: failed.length,
     failedItems: failed,
     results,
-    recommendPhase3B: failed.length === 0
+    recommendPhase3B: false
   };
   fs.mkdirSync('docs/exports/phase3a', { recursive: true });
   fs.writeFileSync('docs/exports/phase3a/prod-smoke-results.json', JSON.stringify(out, null, 2));
