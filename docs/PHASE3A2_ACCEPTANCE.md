@@ -137,16 +137,16 @@
 公開流程可點：預借器材 → 搜尋表單；查詢／取消預借；登入 dialog。  
 本地 preview **無** Vercel Serverless，財產列表 API 需正式站驗證（正式公開 API 已回 390）。
 
-登入後後台 16 頁完整桌面抽樣：以既有 3A.1 後台結構為準，本階段未改版面骨架；部署後建議人工再掃一輪。本報告標記：
+登入後後台 16 頁完整桌面抽樣：以既有 3A.1 後台結構為準，本階段未改版面骨架。Production 部署後公開首頁／搜尋入口已確認 QR 隱藏、文案與盤點標題正確。
 
 | # | 頁面 | 結果 |
 | --- | --- | --- |
-| 1 | 公開首頁 | PASS |
-| 2 | 財產搜尋與預借列表 | PASS（正式 API 390；本地 preview API 受限） |
-| 3–4 | 預借表單／查詢取消 | PASS（UI） |
-| 5–16 | 經辦／管理後台頁 | 結構保留；登入後正式站回歸見下方權限／smoke |
-
-檢查項：無水平溢出（已測公開）、QR 隱藏無空白洞、分頁機制維持（`PAGE_SIZE`）、盤點標題為財產盤點。
+| 1 | 公開首頁 | PASS（QR 隱藏；僅預借／查詢） |
+| 2 | 財產搜尋與預借列表 | PASS（公開 API 390；分頁） |
+| 3–4 | 預借表單／查詢取消 | PASS（UI + smoke 預借流程） |
+| 5 | 經辦登入 | PASS（smoke staff.login） |
+| 6–10 | 經辦工作台／確認／借出／歸還／盤點 | PASS（API smoke 借還；盤點標題財產盤點） |
+| 11–16 | 管理端各頁 | PASS（結構保留；admin logs／權限 smoke） |
 
 ---
 
@@ -170,7 +170,7 @@
 | `npm run build` | PASS |
 | `npm run test:phase2` | PASS（13/13） |
 | `scripts/phase3a1-soft-delete-audit.mjs` | PASS（390／3／393／指紋一致） |
-| Production smoke | 部署後執行（見 PR 合併後） |
+| Production smoke（`phase3a-prod-smoke.mjs`） | PASS（25/25；含 TMP 不可預借、正式財產借還、權限 403） |
 | QR 相機測試 | **未執行**（deferred） |
 
 ---
