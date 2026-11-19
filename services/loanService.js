@@ -1,6 +1,6 @@
 import { PB } from '../pocketbase/schema.mjs';
 import { isDemoMode } from './authService.js';
-import { demoApprove, demoCheckout, demoCompleteCheckout, demoLoans, demoLogs, demoReject, demoReturn, demoSaveSettings, demoSettings } from './demoStore.js';
+import { demoApprove, demoBackfillLoan, demoCheckout, demoCompleteCheckout, demoLoans, demoLogs, demoReject, demoReturn, demoSaveSettings, demoSettings } from './demoStore.js';
 import { getItem, loadCatalog, setOverdueAssetIds } from './inventoryService.js';
 import { getFullList, hkpPost, relationId } from './hkpApi.js';
 import { pbMessage } from './pocketbaseClient.js';
@@ -37,7 +37,13 @@ export const RETURN_RESULT = {
 
 export const CHECKOUT_METHOD = {
   SELF: 'self_service',
-  ADMIN: 'admin'
+  ADMIN: 'admin',
+  BACKFILL: 'backfill'
+};
+
+export const ENTRY_SOURCE = {
+  CHECKOUT: 'checkout',
+  BACKFILL: 'backfill'
 };
 
 const RETURN_ALIASES = {
@@ -55,6 +61,7 @@ export function normalizeReturnResult(value) {
 
 export function checkoutMethodLabel(loan) {
   if (loan?.checkoutMethod === CHECKOUT_METHOD.SELF) return '自助借用';
+  if (loan?.checkoutMethod === CHECKOUT_METHOD.BACKFILL || loan?.entrySource === ENTRY_SOURCE.BACKFILL) return '補登';
   return '管理者辦理';
 }
 
@@ -90,6 +97,8 @@ export function mapLoan(row) {
     borrowerName: row.borrower_name,
     borrowerId: row.borrower_number,
     borrowerDepartment: row.borrower_department,
+    borrowerTitle: row.borrower_title || '',
+    entrySource: row.entry_source || ENTRY_SOURCE.CHECKOUT,
     purpose: row.purpose,
     contact: row.contact || '',
     checkedOutAt: row.checkout_at || row.requested_at,
@@ -273,12 +282,16 @@ export async function assertAvailableForCheckout(propertyId) {
 export async function checkout(payload) {
   const item = await assertAvailableForCheckout(payload.propertyId);
   const method = payload.checkoutMethod === CHECKOUT_METHOD.ADMIN ? CHECKOUT_METHOD.ADMIN : CHECKOUT_METHOD.SELF;
+  const title = String(payload.borrowerTitle || '').trim();
+  if (!title) throw new Error('請填寫職稱');
   const body = {
     asset_id: item.id,
     property_id: item.propertyId,
     borrower_name: payload.borrowerName,
     borrower_number: payload.borrowerId,
     borrower_department: payload.borrowerDepartment,
+    borrower_title: title,
+    entry_source: ENTRY_SOURCE.CHECKOUT,
     purpose: payload.purpose,
     expected_return_at: new Date(payload.expectedReturnAt).toISOString(),
     contact: payload.contact || null,
@@ -295,6 +308,8 @@ export async function checkout(payload) {
       borrower_name: body.borrower_name,
       borrower_number: body.borrower_number,
       borrower_department: body.borrower_department,
+      borrower_title: body.borrower_title,
+      entry_source: body.entry_source,
       purpose: body.purpose,
       expected_return_at: body.expected_return_at,
       contact: body.contact,
@@ -361,6 +376,46 @@ export async function checkin(payload) {
   return { entry: getLoan(loan.id), item: getItem(loan.propertyId || item?.propertyId) };
 }
 
+export async function backfillLoan(payload) {
+  await loadCatalog();
+  const item = getItem(payload.propertyId);
+  if (!item) throw new Error('查無此財產編號');
+  const body = {
+    asset_id: item.id,
+    property_id: item.propertyId,
+    borrower_name: payload.borrowerName,
+    borrower_number: payload.borrowerId,
+    borrower_department: payload.borrowerDepartment,
+    borrower_title: payload.borrowerTitle,
+    purpose: payload.purpose,
+    checkout_at: new Date(payload.checkedOutAt).toISOString(),
+    returned_at: new Date(payload.returnedAt).toISOString(),
+    expected_return_at: new Date(payload.returnedAt).toISOString(),
+    note: payload.note || '補登使用紀錄',
+    entry_source: ENTRY_SOURCE.BACKFILL,
+    checkout_method: CHECKOUT_METHOD.BACKFILL,
+    count_usage: payload.countUsage !== false
+  };
+  const data = isDemoMode()
+    ? demoBackfillLoan({
+      assetId: item.id,
+      propertyId: item.propertyId,
+      borrower_name: body.borrower_name,
+      borrower_number: body.borrower_number,
+      borrower_department: body.borrower_department,
+      borrower_title: body.borrower_title,
+      purpose: body.purpose,
+      checkout_at: body.checkout_at,
+      returned_at: body.returned_at,
+      expected_return_at: body.expected_return_at,
+      note: body.note,
+      count_usage: body.count_usage
+    })
+    : await hkpPost('/api/hkproperty/loans/backfill', body);
+  await Promise.all([loadCatalog(), loadLoans()]);
+  return data;
+}
+
 export async function verifySelfServiceLoan(code, borrowerId) {
   await loadLoans();
   const token = String(code || '').trim();
@@ -393,7 +448,7 @@ export async function lookupSelfServiceLoans(code, borrowerId) {
 
 export function exportLoansCsv(rows) {
   const header = [
-    '借用編號', '財產名稱', '財產編號', '借用人', '學號或教職員編號', '借用單位',
+    '借用編號', '財產名稱', '財產編號', '借用人', '學號或教職員編號', '借用單位', '職稱',
     '借出時間', '預計歸還時間', '實際歸還時間', '借用用途', '借出方式', '經手人', '借用狀態', '歸還結果', '備註'
   ];
   const safe = (value) => {
@@ -408,6 +463,7 @@ export function exportLoansCsv(rows) {
     loan.borrowerName,
     loan.borrowerId,
     loan.borrowerDepartment,
+    loan.borrowerTitle || '',
     loan.checkedOutAt,
     loan.expectedReturnAt,
     loan.returnedAt || '',

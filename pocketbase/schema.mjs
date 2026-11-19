@@ -79,7 +79,8 @@ export const LOAN_STATUSES = [
 export const LEGACY_RESERVATION_STATUSES = ['pending', 'approved', 'rejected', 'cancelled', 'expired', 'converted'];
 export const USAGE_TYPES = ['checkout', 'on_site', 'reservation_checkout', 'admin_record'];
 export const RETURN_RESULTS = ['正常歸還', '有損壞', '配件缺少', '送修', '遺失'];
-export const CHECKOUT_METHODS = ['self_service', 'admin', 'reservation'];
+export const CHECKOUT_METHODS = ['self_service', 'admin', 'reservation', 'backfill'];
+export const LOAN_ENTRY_SOURCES = ['checkout', 'backfill'];
 
 /** Logged-in user of this app's auth collection */
 export const AUTH = `@request.auth.id != "" && @request.auth.collectionName = "${PB.users}"`;
@@ -180,6 +181,8 @@ export const COLLECTIONS = [
       { name: 'borrower_name', type: 'text', required: true },
       { name: 'borrower_number', type: 'text', required: true },
       { name: 'borrower_department', type: 'text', required: true },
+      { name: 'borrower_title', type: 'text', required: true },
+      { name: 'entry_source', type: 'select', maxSelect: 1, values: LOAN_ENTRY_SOURCES },
       { name: 'purpose', type: 'text', required: true },
       { name: 'contact', type: 'text' },
       { name: 'requested_at', type: 'date' },

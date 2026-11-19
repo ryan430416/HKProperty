@@ -380,6 +380,8 @@ export function demoCheckout(payload) {
     borrower_name: payload.borrower_name,
     borrower_number: payload.borrower_number,
     borrower_department: payload.borrower_department,
+    borrower_title: payload.borrower_title || '',
+    entry_source: payload.entry_source || 'checkout',
     purpose: payload.purpose,
     contact: payload.contact || '',
     requested_at: now,
@@ -470,6 +472,60 @@ export function demoReject(id, reason) {
     asset.availability_status = 'available';
     asset.current_loan = '';
   }
+  saveData(data);
+  return rec;
+}
+
+export function demoBackfillLoan(payload) {
+  const data = getDemoData();
+  const asset = assetById(data, payload.assetId || payload.propertyId);
+  if (!asset || asset.active === false || asset.is_active === false) throw new Error('查無此財產編號');
+  const now = new Date().toISOString();
+  const rec = {
+    id: uid('loan'),
+    loan_number: nextLoanNumber(data),
+    asset: asset.id,
+    property_id: asset.property_id,
+    property_name: asset.name,
+    borrower: demoProfile()?.id || 'demo-borrower',
+    borrower_name: payload.borrower_name,
+    borrower_number: payload.borrower_number,
+    borrower_department: payload.borrower_department,
+    borrower_title: payload.borrower_title || '',
+    entry_source: 'backfill',
+    purpose: payload.purpose,
+    contact: '',
+    requested_at: payload.checkout_at || now,
+    checkout_at: payload.checkout_at || now,
+    expected_return_at: payload.expected_return_at || payload.returned_at || now,
+    returned_at: payload.returned_at || now,
+    checkout_condition: '',
+    checkout_method: 'backfill',
+    checkout_operator: demoProfile()?.display_name || '補登',
+    return_operator: demoProfile()?.display_name || '補登',
+    return_result: '正常歸還',
+    return_location: asset.location || '',
+    status: 'returned',
+    note: payload.note || '補登使用紀錄',
+    created: now,
+    updated: now
+  };
+  data.loans.unshift(rec);
+  if (payload.count_usage !== false) {
+    data.usage.unshift({
+      id: uid('use'),
+      asset: asset.id,
+      loan: rec.id,
+      user_name: rec.borrower_name,
+      user_number: rec.borrower_number,
+      department: rec.borrower_department,
+      used_at: rec.checkout_at,
+      purpose: rec.purpose,
+      note: `補登 ${rec.loan_number}`
+    });
+    syncDemoUsageCount(data, asset);
+  }
+  log(data, '補登使用紀錄', { loan_number: rec.loan_number, property_id: asset.property_id });
   saveData(data);
   return rec;
 }

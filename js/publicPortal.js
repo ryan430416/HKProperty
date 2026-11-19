@@ -54,7 +54,7 @@ function tooManyFails() {
 }
 
 function clearFieldErrors() {
-  ['portalUnit', 'portalName', 'portalPhone'].forEach((id) => {
+  ['portalUnit', 'portalTitle', 'portalName', 'portalPhone'].forEach((id) => {
     const input = $(id);
     const err = $(`${id}Error`);
     if (input) input.removeAttribute('aria-invalid');
@@ -71,8 +71,10 @@ function setFieldError(id, message) {
 
 function validatePortalPerson() {
   clearFieldErrors();
+  const title = String($('portalTitle')?.value || '').trim();
   const checks = [
     ['portalUnit', validateUnit($('portalUnit')?.value)],
+    ['portalTitle', title ? '' : '請填寫職稱'],
     ['portalName', validateName($('portalName')?.value)],
     ['portalPhone', validatePhone($('portalPhone')?.value)]
   ];
@@ -338,6 +340,8 @@ export function bindPublicPortal(onStaffLogin) {
     if (btn) btn.disabled = true;
     showMessage('');
     try {
+      const title = String($('portalTitle')?.value || '').trim();
+      const noteText = String($('portalNote')?.value || '').trim();
       const result = await createReservation({
         assetId: selected.id,
         unit: $('portalUnit').value,
@@ -347,7 +351,7 @@ export function bindPublicPortal(onStaffLogin) {
         borrowDate: $('portalStart')?.value,
         expectedReturnDate: $('portalEnd')?.value,
         privacyAck: true,
-        notes: $('portalNote')?.value || ''
+        notes: [title ? `職稱:${title}` : '', noteText].filter(Boolean).join('｜')
       });
       showIssued(result);
     } catch (error) {

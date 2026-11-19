@@ -145,6 +145,96 @@ async function createLoan(_body) {
   throw new Error('舊借出路徑已停用：請改用預借核准後的「確認借出」');
 }
 
+async function createBackfillLoan(body) {
+  const client = requireClient();
+  const auth = authRecord();
+  const asset = await requireAsset(body.asset_id || body.property_id);
+  const borrowerName = trim(body.borrower_name);
+  const borrowerNumber = trim(body.borrower_number);
+  const borrowerDepartment = trim(body.borrower_department);
+  const borrowerTitle = trim(body.borrower_title);
+  const purpose = trim(body.purpose);
+  if (!borrowerName) throw new Error('請填寫借用人姓名');
+  if (borrowerNumber.length < 4) throw new Error('學號或教職員編號至少 4 個字元');
+  if (!borrowerDepartment) throw new Error('請填寫借用單位');
+  if (!borrowerTitle) throw new Error('請填寫職稱');
+  if (!purpose) throw new Error('請填寫借用用途');
+  if (!body.checkout_at) throw new Error('請填寫借用日期');
+  if (!body.returned_at) throw new Error('請填寫歸還日期');
+  if (new Date(body.returned_at) < new Date(body.checkout_at)) throw new Error('歸還日期不得早於借用日期');
+
+  const isSelf = !isStaff(auth);
+  if (isSelf) {
+    const myName = displayName(auth);
+    const myNumber = trim(auth.school_number || auth.employee_number || '');
+    if (borrowerName !== myName && borrowerNumber !== myNumber) {
+      throw new Error('學生僅能補登本人的使用紀錄');
+    }
+  }
+
+  const day = String(body.checkout_at).slice(0, 10);
+  const existing = await client.collection(PB.loans).getList(1, 1, {
+    filter: `property_id = "${trim(asset.property_id)}" && borrower_name = "${borrowerName.replace(/"/g, '')}" && checkout_at >= "${day} 00:00:00.000Z" && checkout_at <= "${day} 23:59:59.999Z" && status = "returned"`
+  }).catch(() => ({ totalItems: 0, items: [] }));
+  if (existing.totalItems > 0) throw new Error('已有相同財產、借用日與借用人的紀錄，請勿重複補登');
+
+  const loans = await client.collection(PB.loans).getFullList({
+    filter: `loan_number ~ "LOAN-${day.replace(/-/g, '')}-"`
+  }).catch(() => []);
+  const loanNumber = nextLoanNumber(loans);
+
+  const payload = {
+    loan_number: loanNumber,
+    asset: asset.id,
+    property_id: asset.property_id,
+    property_name: asset.name,
+    borrower: auth.id,
+    borrower_name: borrowerName,
+    borrower_number: borrowerNumber,
+    borrower_department: borrowerDepartment,
+    borrower_title: borrowerTitle,
+    entry_source: 'backfill',
+    purpose,
+    requested_at: body.checkout_at,
+    checkout_at: body.checkout_at,
+    expected_return_at: body.expected_return_at || body.returned_at,
+    returned_at: body.returned_at,
+    checkout_method: 'backfill',
+    checkout_operator: displayName(auth) || '補登',
+    return_operator: displayName(auth) || '補登',
+    return_result: '正常歸還',
+    return_location: asset.location || '',
+    status: 'returned',
+    note: trim(body.note) || '補登使用紀錄'
+  };
+
+  let rec;
+  try {
+    rec = await client.collection(PB.loans).create(payload);
+  } catch (error) {
+    // Older schemas may lack borrower_title / entry_source / backfill method.
+    delete payload.borrower_title;
+    delete payload.entry_source;
+    payload.checkout_method = 'admin';
+    payload.note = `${payload.note}｜職稱:${borrowerTitle}｜來源:backfill`;
+    rec = await client.collection(PB.loans).create(payload);
+  }
+
+  if (body.count_usage !== false) {
+    await createUsageRecord(asset, {
+      user_name: borrowerName,
+      user_number: borrowerNumber,
+      department: borrowerDepartment,
+      used_at: body.checkout_at,
+      purpose,
+      note: `補登 ${loanNumber}`
+    });
+    await syncUsageCount(asset.id);
+  }
+  await logOp('補登使用紀錄', 'loan', rec.id, asset.id, { loan_number: loanNumber, property_id: asset.property_id });
+  return rec;
+}
+
 async function completeCheckout(_id) {
   throw new Error('舊借出路徑已停用：請改用預借核准後的「確認借出」');
 }
@@ -249,6 +339,8 @@ async function runHkpDirect(path, body = {}) {
   // Normalize new API paths to existing handlers
   if (path === '/api/hkproperty/loans/checkout') return createLoan({ ...body, checkout_method: body.checkout_method || 'self_service' });
   if (path === '/api/hkproperty/loans/request') return createLoan({ ...body, force_pending: true });
+  if (path === '/api/hkproperty/loans/backfill') return createBackfillLoan(body);
+  if (path === '/api/hkp/loans/backfill') return createBackfillLoan(body);
   if (path === '/api/hkproperty/loans/return') {
     return completeReturn(body.loan_id, body);
   }

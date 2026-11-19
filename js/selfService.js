@@ -10,6 +10,8 @@ import {
   overdueDuration,
   verifySelfServiceLoan
 } from '../services/loanService.js';
+import { submitBackfill } from '../services/usageLogbookService.js';
+import { loadPreferredTitle, savePreferredTitle } from '../services/usageLogPdf.js';
 import { displayValue, esc, formatDateTime, toInputDateTime, categoryIcon } from './format.js';
 import { getProfile } from '../services/authService.js';
 import { toast } from './ui.js';
@@ -21,13 +23,17 @@ const state = {
   mode: 'home',
   borrowStep: 1,
   returnStep: 1,
+  backfillStep: 1,
   item: null,
   loan: null,
   lastLoanId: '',
   lastBorrowerId: '',
   submitting: false,
   availableLimit: PAGE_SIZE,
-  availableMatches: []
+  availableMatches: [],
+  backfillLimit: PAGE_SIZE,
+  backfillMatches: [],
+  pendingBackfill: null
 };
 
 let onChanged = () => {};
@@ -79,6 +85,18 @@ function showHome() {
   show($('ssBorrow'), false);
   show($('ssReturn'), false);
   show($('ssLookup'), false);
+  show($('ssBackfill'), false);
+}
+
+function setBackfillStep(step) {
+  state.backfillStep = step;
+  document.querySelectorAll('#ssBackfill [data-ss-bf-step]').forEach((el) => {
+    el.classList.toggle('active', Number(el.dataset.ssBfStep) <= step);
+  });
+  show($('ssBackfillStep1'), step === 1);
+  show($('ssBackfillForm'), step === 2);
+  show($('ssBackfillConfirm'), step === 3);
+  show($('ssBackfillSuccess'), step === 4);
 }
 
 export function openSelfMode(mode) {
@@ -91,6 +109,7 @@ export function openSelfMode(mode) {
   show($('ssBorrow'), mode === 'borrow');
   show($('ssReturn'), mode === 'return');
   show($('ssLookup'), mode === 'lookup');
+  show($('ssBackfill'), mode === 'backfill');
   if (mode === 'borrow') {
     if (state.borrowStep >= 4) {
       state.borrowStep = 1;
@@ -114,6 +133,14 @@ export function openSelfMode(mode) {
     show($('ssLookupResult'), false);
     if (state.lastLoanId) $('ssLookupCode').value = state.lastLoanId;
     if (state.lastBorrowerId) $('ssLookupBorrowerId').value = state.lastBorrowerId;
+  }
+  if (mode === 'backfill') {
+    state.backfillStep = 1;
+    state.item = null;
+    state.pendingBackfill = null;
+    state.backfillLimit = PAGE_SIZE;
+    renderBackfillList();
+    setBackfillStep(1);
   }
 }
 
@@ -213,6 +240,7 @@ function readBorrowForm() {
     borrowerName: $('ssBorrowerName').value,
     borrowerId: $('ssBorrowerId').value,
     borrowerDepartment: $('ssBorrowerDept').value,
+    borrowerTitle: $('ssBorrowerTitle')?.value || '',
     purpose: $('ssBorrowPurpose').value,
     checkedOutAt: $('ssBorrowAt').value,
     expectedReturnAt: $('ssBorrowDue').value,
@@ -231,6 +259,7 @@ function validateBorrowForm(data) {
   if (!data.borrowerId.trim()) errors.ssBorrowerIdError = '請填寫學號或教職員編號';
   else if (data.borrowerId.trim().length < 4) errors.ssBorrowerIdError = '學號或教職員編號至少 4 個字元';
   if (!data.borrowerDepartment.trim()) errors.ssBorrowerDeptError = '請填寫借用單位、系所或社團';
+  if (!String(data.borrowerTitle || '').trim()) errors.ssBorrowerTitleError = '請填寫職稱';
   if (!data.purpose.trim()) errors.ssBorrowPurposeError = '請填寫借用用途';
   if (!data.checkedOutAt) errors.ssBorrowAtError = '請填寫借出日期與時間';
   if (!data.expectedReturnAt) errors.ssBorrowDueError = '請填寫預計歸還日期與時間';
@@ -249,6 +278,9 @@ function fillBorrowDefaults() {
     if (!$('ssBorrowerId').value) $('ssBorrowerId').value = profile.school_number || '';
     if (!$('ssBorrowerDept').value) $('ssBorrowerDept').value = profile.department || '';
   }
+  if ($('ssBorrowerTitle') && !$('ssBorrowerTitle').value) {
+    $('ssBorrowerTitle').value = loadPreferredTitle();
+  }
   if (!$('ssBorrowAt').value) $('ssBorrowAt').value = toInputDateTime();
   if (!$('ssBorrowDue').value) {
     const due = new Date();
@@ -263,6 +295,7 @@ function showBorrowConfirm(data) {
     ['財產編號', state.item.propertyId],
     ['借用人', data.borrowerName],
     ['借用單位', data.borrowerDepartment],
+    ['職稱', data.borrowerTitle],
     ['借用用途', data.purpose],
     ['借出時間', formatDateTime(new Date(data.checkedOutAt).toISOString())],
     ['預計歸還時間', formatDateTime(new Date(data.expectedReturnAt).toISOString())]
@@ -278,6 +311,7 @@ async function submitBorrow() {
   try {
     const data = readBorrowForm();
     const result = await checkout(data);
+    savePreferredTitle(data.borrowerTitle);
     state.lastLoanId = result.entry.id;
     state.lastBorrowerId = result.entry.borrowerId;
     $('ssBorrowSuccessBody').innerHTML = `
@@ -443,7 +477,7 @@ export function bindSelfService(handlers = {}) {
   $('ssBorrowForm').addEventListener('submit', (event) => {
     event.preventDefault();
     clearErrors([
-      'ssBorrowerNameError', 'ssBorrowerIdError', 'ssBorrowerDeptError', 'ssBorrowPurposeError',
+      'ssBorrowerNameError', 'ssBorrowerIdError', 'ssBorrowerDeptError', 'ssBorrowerTitleError', 'ssBorrowPurposeError',
       'ssBorrowAtError', 'ssBorrowDueError', 'ssBorrowConfirmError'
     ]);
     const data = readBorrowForm();
@@ -545,6 +579,183 @@ export function bindSelfService(handlers = {}) {
     if (!btn) return;
     startReturnFromLoan(btn.dataset.ssReturnLoan, $('ssLookupBorrowerId').value);
   });
+
+  $('ssBackfillSearch')?.addEventListener('input', () => {
+    state.backfillLimit = PAGE_SIZE;
+    renderBackfillList();
+  });
+  $('ssBackfillMoreBtn')?.addEventListener('click', () => {
+    state.backfillLimit += PAGE_SIZE;
+    renderBackfillList();
+  });
+  $('ssBackfillList')?.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-backfill-pick]');
+    if (!btn) return;
+    selectBackfillItem(btn.dataset.backfillPick);
+  });
+  $('ssBackfillBackToItem')?.addEventListener('click', () => {
+    state.backfillLimit = PAGE_SIZE;
+    setBackfillStep(1);
+    renderBackfillList();
+  });
+  $('ssBackfillForm')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    clearErrors([
+      'ssBackfillNameError', 'ssBackfillIdError', 'ssBackfillDeptError', 'ssBackfillTitleError',
+      'ssBackfillPurposeError', 'ssBackfillBorrowAtError', 'ssBackfillReturnAtError'
+    ]);
+    const data = readBackfillForm();
+    const errors = validateBackfillForm(data);
+    const keys = Object.keys(errors);
+    if (keys.length) {
+      keys.forEach((id) => setError(id, errors[id]));
+      toast(errors[keys[0]], 'error');
+      return;
+    }
+    state.pendingBackfill = data;
+    showBackfillConfirm(data);
+    setBackfillStep(3);
+  });
+  $('ssBackfillEditBtn')?.addEventListener('click', () => setBackfillStep(2));
+  $('ssBackfillSubmitBtn')?.addEventListener('click', submitBackfillForm);
+}
+
+function listAllAssetsForBackfill() {
+  return listItems()
+    .filter((item) => item.isActive !== false)
+    .sort((a, b) => {
+      const byName = String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant');
+      if (byName) return byName;
+      return String(a.propertyId || '').localeCompare(String(b.propertyId || ''), 'zh-Hant');
+    });
+}
+
+function filteredBackfillItems() {
+  const q = String($('ssBackfillSearch')?.value || '').trim().toLowerCase();
+  return listAllAssetsForBackfill().filter((item) => {
+    if (!q) return true;
+    return [item.name, item.propertyId, item.location, item.department]
+      .join(' ')
+      .toLowerCase()
+      .includes(q);
+  });
+}
+
+function renderBackfillList() {
+  const list = $('ssBackfillList');
+  const meta = $('ssBackfillListMeta');
+  const moreBtn = $('ssBackfillMoreBtn');
+  if (!list || !meta) return;
+  state.backfillMatches = filteredBackfillItems();
+  const rows = state.backfillMatches.slice(0, state.backfillLimit);
+  meta.textContent = `共 ${state.backfillMatches.length} 項，顯示 ${rows.length} 項`;
+  if (moreBtn) moreBtn.hidden = rows.length >= state.backfillMatches.length;
+  list.innerHTML = rows.length
+    ? rows.map((item) => `
+      <button type="button" class="ss-available-item" data-backfill-pick="${esc(item.propertyId)}" role="listitem">
+        <span class="ss-available-icon" aria-hidden="true">${categoryIcon(item.name)}</span>
+        <span>
+          <strong>${esc(item.name)}</strong>
+          <span class="muted">${esc(item.propertyId)} · ${esc(displayValue(item.location))}</span>
+        </span>
+      </button>
+    `).join('')
+    : '<p class="muted">找不到符合的財產</p>';
+}
+
+function selectBackfillItem(propertyId) {
+  const item = getItem(propertyId);
+  if (!item) {
+    toast('找不到財產', 'error');
+    return;
+  }
+  state.item = item;
+  fillBackfillDefaults();
+  setBackfillStep(2);
+}
+
+function fillBackfillDefaults() {
+  $('ssBackfillFormHint').textContent = `${state.item.name} · ${state.item.propertyId}`;
+  const profile = getProfile();
+  if (profile) {
+    if (!$('ssBackfillName').value) $('ssBackfillName').value = profile.display_name || '';
+    if (!$('ssBackfillId').value) $('ssBackfillId').value = profile.school_number || '';
+    if (!$('ssBackfillDept').value) $('ssBackfillDept').value = profile.department || '';
+  }
+  if (!$('ssBackfillTitle').value) $('ssBackfillTitle').value = loadPreferredTitle();
+  if (!$('ssBackfillBorrowAt').value) $('ssBackfillBorrowAt').value = toInputDateTime();
+  if (!$('ssBackfillReturnAt').value) $('ssBackfillReturnAt').value = toInputDateTime();
+}
+
+function readBackfillForm() {
+  return {
+    propertyId: state.item?.propertyId,
+    borrowerName: $('ssBackfillName').value,
+    borrowerId: $('ssBackfillId').value,
+    borrowerDepartment: $('ssBackfillDept').value,
+    borrowerTitle: $('ssBackfillTitle').value,
+    purpose: $('ssBackfillPurpose').value,
+    borrowedAt: $('ssBackfillBorrowAt').value,
+    returnedAt: $('ssBackfillReturnAt').value,
+    note: $('ssBackfillNote').value
+  };
+}
+
+function validateBackfillForm(data) {
+  const errors = {};
+  if (!data.borrowerName.trim()) errors.ssBackfillNameError = '請填寫借用人姓名';
+  if (!data.borrowerId.trim()) errors.ssBackfillIdError = '請填寫學號或教職員編號';
+  else if (data.borrowerId.trim().length < 4) errors.ssBackfillIdError = '學號或教職員編號至少 4 個字元';
+  if (!data.borrowerDepartment.trim()) errors.ssBackfillDeptError = '請填寫借用單位、系所或社團';
+  if (!data.borrowerTitle.trim()) errors.ssBackfillTitleError = '請填寫職稱';
+  if (!data.purpose.trim()) errors.ssBackfillPurposeError = '請填寫借用用途';
+  if (!data.borrowedAt) errors.ssBackfillBorrowAtError = '請填寫借用日期與時間';
+  if (!data.returnedAt) errors.ssBackfillReturnAtError = '請填寫歸還日期與時間';
+  if (data.borrowedAt && data.returnedAt && new Date(data.returnedAt) < new Date(data.borrowedAt)) {
+    errors.ssBackfillReturnAtError = '歸還日期不得早於借用日期';
+  }
+  return errors;
+}
+
+function showBackfillConfirm(data) {
+  $('ssBackfillSummary').innerHTML = kv([
+    ['物品名稱', state.item.name],
+    ['財產編號', state.item.propertyId],
+    ['借用人', `${data.borrowerDepartment}/${data.borrowerTitle}/${data.borrowerName}`],
+    ['借用用途', data.purpose],
+    ['借用時間', formatDateTime(new Date(data.borrowedAt).toISOString())],
+    ['歸還時間', formatDateTime(new Date(data.returnedAt).toISOString())]
+  ]);
+}
+
+async function submitBackfillForm() {
+  if (state.submitting) return;
+  const btn = $('ssBackfillSubmitBtn');
+  state.submitting = true;
+  btn.disabled = true;
+  btn.textContent = '處理中';
+  try {
+    const data = state.pendingBackfill || readBackfillForm();
+    const result = await submitBackfill(data);
+    savePreferredTitle(data.borrowerTitle);
+    $('ssBackfillSuccessBody').innerHTML = kv([
+      ['物品名稱', result.item.name],
+      ['財產編號', result.item.propertyId],
+      ['借用編號', result.entry.id],
+      ['借用人', `${result.entry.borrowerDepartment}/${result.entry.borrowerTitle}/${result.entry.borrowerName}`],
+      ['借用時間', formatDateTime(result.entry.checkedOutAt)],
+      ['歸還時間', formatDateTime(result.entry.returnedAt)]
+    ]);
+    setBackfillStep(4);
+    await onChanged();
+    toast('補登成功');
+  } catch (error) {
+    toast(error.message || '補登失敗', 'error');
+  } finally {
+    state.submitting = false;
+    btn.disabled = false;
+    btn.textContent = '確認補登';
+  }
 }
 
 export { showHome };

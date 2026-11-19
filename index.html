@@ -87,6 +87,11 @@
         <input id="portalUnit" maxlength="50" autocomplete="organization" />
         <p class="field-error" id="portalUnitError" role="alert"></p>
       </div>
+      <div class="field" id="portalTitleWrap">
+        <label for="portalTitle">職稱 <span class="req">必填</span></label>
+        <input id="portalTitle" maxlength="40" placeholder="例如：社長、公關部部員" />
+        <p class="field-error" id="portalTitleError" role="alert"></p>
+      </div>
       <div class="field">
         <label for="portalName">姓名 <span class="req">必填</span></label>
         <input id="portalName" maxlength="30" autocomplete="name" />
@@ -181,6 +186,7 @@
         <button type="button" class="nav-item" data-min-role="admin" data-view="dashboard">系統總覽</button>
         <button type="button" class="nav-item" data-min-role="admin" data-view="inventory">財產管理</button>
         <button type="button" class="nav-item" data-min-role="admin" data-view="usage">使用紀錄</button>
+        <button type="button" class="nav-item" data-min-role="staff" data-view="usageExport">年度使用紀錄 PDF</button>
         <button type="button" class="nav-item" data-min-role="admin" data-view="logs">操作紀錄</button>
         <button type="button" class="nav-item" data-min-role="admin" data-view="users">經辦人員管理</button>
         <button type="button" class="nav-item" data-min-role="admin" data-view="settings">資料匯出／設定</button>
@@ -294,6 +300,10 @@
               <strong>查詢借用狀態</strong>
               <span>查看自己的借用與歸還情形</span>
             </button>
+            <button type="button" class="kiosk-btn" data-self="backfill">
+              <strong>補登使用紀錄</strong>
+              <span>補登已完成借用，供年度使用紀錄匯出</span>
+            </button>
           </div>
           <div class="stat-grid" id="statGrid"></div>
           <div class="dash-grid">
@@ -334,6 +344,11 @@
                 <span class="ss-card-num">3</span>
                 <strong>查詢借用紀錄</strong>
                 <span>查詢自己的借用狀態並可辦理歸還</span>
+              </button>
+              <button type="button" class="ss-card" data-self="backfill">
+                <span class="ss-card-num">4</span>
+                <strong>補登使用紀錄</strong>
+                <span>補登已完成的借用／歸還，供年度使用紀錄匯出</span>
               </button>
             </div>
           </div>
@@ -383,6 +398,11 @@
                 <label for="ssBorrowerDept">借用單位、系所或社團 <span class="req">必填</span></label>
                 <input id="ssBorrowerDept" maxlength="60" />
                 <p class="field-error" id="ssBorrowerDeptError"></p>
+              </div>
+              <div class="field">
+                <label for="ssBorrowerTitle">職稱 <span class="req">必填</span></label>
+                <input id="ssBorrowerTitle" maxlength="40" placeholder="例如：社長、公關部部員" />
+                <p class="field-error" id="ssBorrowerTitleError"></p>
               </div>
               <div class="field">
                 <label for="ssBorrowPurpose">借用用途 <span class="req">必填</span></label>
@@ -556,6 +576,93 @@
               <div class="ss-sticky">
                 <button type="button" class="secondary" id="ssLookupAgainBtn">重新查詢</button>
                 <button type="button" class="primary" data-self="home">返回首頁</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="ssBackfill" class="ss-flow" hidden>
+            <ol class="ss-steps" aria-label="補登步驟">
+              <li data-ss-bf-step="1" class="active">選擇財產</li>
+              <li data-ss-bf-step="2">填寫資料</li>
+              <li data-ss-bf-step="3">確認完成</li>
+            </ol>
+            <div id="ssBackfillStep1" class="panel ss-panel">
+              <h2>選擇要補登的財產</h2>
+              <p class="muted">補登不會把財產改成已借出，只寫入已完成的使用紀錄供年度 PDF 匯出。</p>
+              <div class="ss-browse-filters">
+                <div class="field">
+                  <label for="ssBackfillSearch">搜尋物品名稱、編號或地點</label>
+                  <input id="ssBackfillSearch" type="search" autocomplete="off" placeholder="例如：平板電腦、1110136001" />
+                </div>
+              </div>
+              <p class="muted" id="ssBackfillListMeta">載入中…</p>
+              <div id="ssBackfillList" class="ss-available-list" role="list"></div>
+              <div class="ss-sticky">
+                <button type="button" class="secondary" data-self="home">返回</button>
+                <button type="button" class="ghost-btn" id="ssBackfillMoreBtn" hidden>顯示更多</button>
+              </div>
+            </div>
+            <form id="ssBackfillForm" class="panel ss-panel" hidden>
+              <h2>填寫補登資料</h2>
+              <p id="ssBackfillFormHint" class="muted"></p>
+              <div class="field">
+                <label for="ssBackfillName">借用人姓名 <span class="req">必填</span></label>
+                <input id="ssBackfillName" maxlength="40" autocomplete="name" />
+                <p class="field-error" id="ssBackfillNameError"></p>
+              </div>
+              <div class="field">
+                <label for="ssBackfillId">學號或教職員編號 <span class="req">必填</span></label>
+                <input id="ssBackfillId" maxlength="40" autocomplete="off" />
+                <p class="field-error" id="ssBackfillIdError"></p>
+              </div>
+              <div class="field">
+                <label for="ssBackfillDept">借用單位、系所或社團 <span class="req">必填</span></label>
+                <input id="ssBackfillDept" maxlength="60" />
+                <p class="field-error" id="ssBackfillDeptError"></p>
+              </div>
+              <div class="field">
+                <label for="ssBackfillTitle">職稱 <span class="req">必填</span></label>
+                <input id="ssBackfillTitle" maxlength="40" placeholder="例如：社長、公關部部員" />
+                <p class="field-error" id="ssBackfillTitleError"></p>
+              </div>
+              <div class="field">
+                <label for="ssBackfillPurpose">借用用途 <span class="req">必填</span></label>
+                <input id="ssBackfillPurpose" maxlength="80" />
+                <p class="field-error" id="ssBackfillPurposeError"></p>
+              </div>
+              <div class="field">
+                <label for="ssBackfillBorrowAt">借用日期與時間 <span class="req">必填</span></label>
+                <input id="ssBackfillBorrowAt" type="datetime-local" />
+                <p class="field-error" id="ssBackfillBorrowAtError"></p>
+              </div>
+              <div class="field">
+                <label for="ssBackfillReturnAt">歸還日期與時間 <span class="req">必填</span></label>
+                <input id="ssBackfillReturnAt" type="datetime-local" />
+                <p class="field-error" id="ssBackfillReturnAtError"></p>
+              </div>
+              <div class="field">
+                <label for="ssBackfillNote">備註</label>
+                <textarea id="ssBackfillNote" rows="2" maxlength="200"></textarea>
+              </div>
+              <div class="ss-sticky">
+                <button type="button" class="secondary" id="ssBackfillBackToItem">返回修改財產</button>
+                <button type="submit" class="primary">下一步：確認補登</button>
+              </div>
+            </form>
+            <div id="ssBackfillConfirm" class="panel ss-panel" hidden>
+              <h2>確認補登</h2>
+              <div id="ssBackfillSummary" class="summary-box"></div>
+              <div class="ss-sticky">
+                <button type="button" class="secondary" id="ssBackfillEditBtn">返回修改</button>
+                <button type="button" class="primary" id="ssBackfillSubmitBtn">確認補登</button>
+              </div>
+            </div>
+            <div id="ssBackfillSuccess" class="panel ss-panel ss-success" hidden>
+              <h2>補登成功</h2>
+              <div id="ssBackfillSuccessBody" class="summary-box"></div>
+              <div class="ss-sticky">
+                <button type="button" class="secondary" data-self="home">返回首頁</button>
+                <button type="button" class="primary" data-self="backfill">繼續補登</button>
               </div>
             </div>
           </div>
@@ -775,6 +882,36 @@
             <div id="usageList"></div>
           </div>
           <div class="pager" id="usagePager"></div>
+        </section>
+
+        <section class="view" id="view-usageExport" hidden aria-label="年度使用紀錄 PDF">
+          <div class="panel">
+            <h2>年度器材使用紀錄 PDF</h2>
+            <p class="muted">依已歸還／補登紀錄產出與官方表格版面對齊的 PDF。缺職稱等欄位的紀錄會先列出警示。</p>
+            <div class="filters">
+              <div class="field">
+                <label for="usageExportYear">民國年度</label>
+                <input id="usageExportYear" type="number" min="100" max="200" step="1" />
+              </div>
+              <div class="field">
+                <label for="usageExportProperty">財產（可留空＝全部）</label>
+                <select id="usageExportProperty">
+                  <option value="">全部財產</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>&nbsp;</label>
+                <button type="button" class="secondary" id="usageExportPreviewBtn">預覽清單</button>
+              </div>
+              <div class="field">
+                <label>&nbsp;</label>
+                <button type="button" class="primary" id="usageExportDownloadBtn">下載 PDF</button>
+              </div>
+            </div>
+            <p class="muted" id="usageExportSummary">請先預覽清單。</p>
+            <div id="usageExportIncomplete" class="card-list"></div>
+            <div id="usageExportList" class="card-list"></div>
+          </div>
         </section>
 
         <section class="view" id="view-locations" hidden aria-label="位置管理">
@@ -1126,6 +1263,10 @@
         <div class="field">
           <label for="checkoutDept">借用單位或系所 <span class="req">必填</span></label>
           <input id="checkoutDept" required maxlength="60" />
+        </div>
+        <div class="field">
+          <label for="checkoutTitle">職稱 <span class="req">必填</span></label>
+          <input id="checkoutTitle" required maxlength="40" placeholder="例如：社長、公關部部員" />
         </div>
         <div class="field">
           <label for="checkoutAt">借出日期與時間 <span class="req">必填</span></label>

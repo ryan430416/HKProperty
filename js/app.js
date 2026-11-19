@@ -28,6 +28,15 @@ import {
 import { FEATURES } from '../shared/features.js';
 import { displayInventorySessionTitle } from '../shared/assetLifecycle.js';
 import { addUsage, listUsage, loadUsage } from '../services/usageService.js';
+import { logbookExportPreview } from '../services/usageLogbookService.js';
+import {
+  buildUsageLogPdf,
+  downloadPdfBytes,
+  fetchKaiFontBytes,
+  loadPreferredTitle,
+  savePreferredTitle,
+  toRocDate
+} from '../services/usageLogPdf.js';
 import { addAudit, confirmLocationUpdate, listAudits, listLocationChanges, loadAudits, loadLocationHistory } from '../services/auditService.js';
 import {
   CHECKOUT_METHOD,
@@ -124,6 +133,7 @@ const PAGE_META = {
   inventory: ['財產管理', '財產清冊'],
   audit: ['財產盤點', '財產盤點'],
   usage: ['使用紀錄', '使用紀錄'],
+  usageExport: ['年度使用紀錄 PDF', '年度使用紀錄 PDF'],
   logs: ['操作紀錄', '操作紀錄'],
   users: ['經辦人員管理', '帳號管理'],
   settings: ['資料匯出／設定', '系統設定']
@@ -757,6 +767,69 @@ async function renderAuditPage() {
   }
 }
 
+function currentRocYear() {
+  return new Date().getFullYear() - 1911;
+}
+
+function ensureUsageExportDefaults() {
+  const yearInput = $('usageExportYear');
+  if (yearInput && !yearInput.value) yearInput.value = String(currentRocYear());
+}
+
+function renderUsageExportPage(force = false) {
+  ensureUsageExportDefaults();
+  const year = Number($('usageExportYear')?.value || currentRocYear());
+  const propertyId = String($('usageExportProperty')?.value || '').trim();
+  const preview = logbookExportPreview(year, propertyId);
+  const select = $('usageExportProperty');
+  if (select && (force || select.options.length <= 1)) {
+    const current = select.value;
+    select.innerHTML = `<option value="">全部財產</option>${preview.assetOptions.map((item) => (
+      `<option value="${esc(item.propertyId)}">${esc(item.propertyId)} · ${esc(item.name)}</option>`
+    )).join('')}`;
+    select.value = current || propertyId || '';
+  }
+  $('usageExportSummary').textContent = `民國 ${year} 年：可匯出 ${preview.complete.length} 筆，缺欄 ${preview.incomplete.length} 筆（共 ${preview.rows.length} 筆已歸還／補登）`;
+  $('usageExportIncomplete').innerHTML = preview.incomplete.length
+    ? `<div class="panel"><h3>缺欄警示（不會匯入 PDF）</h3>${preview.incomplete.map((row) => `
+        <article class="log-item">
+          <strong>${esc(row.propertyName)} · ${esc(row.propertyId)}</strong>
+          <div class="muted">${esc(row.borrowerName || '未填姓名')}／${esc(row.borrowerDepartment || '未填單位')}／${esc(row.borrowerTitle || '未填職稱')}</div>
+          <div>${esc(row.purpose || '未填用途')} · 歸還 ${esc(toRocDate(row.returnedAt))}</div>
+        </article>
+      `).join('')}</div>`
+    : '<p class="muted">沒有缺欄紀錄。</p>';
+  $('usageExportList').innerHTML = preview.complete.length
+    ? preview.complete.slice(0, 40).map((row) => `
+        <article class="log-item">
+          <strong>${esc(row.propertyName)} · ${esc(row.propertyId)}</strong>
+          <div class="muted">${esc(toRocDate(row.checkedOutAt))} → ${esc(toRocDate(row.returnedAt))}</div>
+          <div>${esc(row.purpose)}</div>
+          <div>${esc(row.borrowerDepartment)}／${esc(row.borrowerTitle)}／${esc(row.borrowerName)}</div>
+        </article>
+      `).join('')
+    : '<p class="muted">目前沒有可匯出的完整紀錄。</p>';
+}
+
+async function downloadUsageExportPdf() {
+  ensureUsageExportDefaults();
+  const year = Number($('usageExportYear')?.value || currentRocYear());
+  const propertyId = String($('usageExportProperty')?.value || '').trim();
+  const preview = logbookExportPreview(year, propertyId);
+  if (!preview.complete.length) throw new Error('沒有可匯出的完整紀錄，請先補齊職稱等欄位或補登');
+  if (preview.incomplete.length) {
+    toast(`有 ${preview.incomplete.length} 筆缺欄，已略過並只匯出完整紀錄`, 'error');
+  }
+  const fontBytes = await fetchKaiFontBytes(import.meta.env.BASE_URL || '/');
+  const bytes = await buildUsageLogPdf({
+    groups: preview.groups,
+    fontBytes,
+    rocYear: String(year)
+  });
+  downloadPdfBytes(bytes, `${year}年度器材使用紀錄.pdf`);
+  toast('PDF 已下載');
+}
+
 function renderUsagePage() {
   const logs = listUsage();
   const data = paginate(logs, state.usagePage);
@@ -953,6 +1026,7 @@ function render() {
   if (state.view === 'reservations') renderReservationManage();
   if (state.view === 'audit') renderAuditPage();
   if (state.view === 'usage') renderUsagePage();
+  if (state.view === 'usageExport') renderUsageExportPage();
   if (state.view === 'locations') renderLocations();
   if (state.view === 'logs') renderLogs();
   if (state.view === 'users') renderUsers();
@@ -1205,12 +1279,14 @@ function readCheckoutForm() {
     borrowerName: $('checkoutBorrower').value,
     borrowerId: $('checkoutBorrowerId').value,
     borrowerDepartment: $('checkoutDept').value,
+    borrowerTitle: $('checkoutTitle')?.value || '',
     checkedOutAt: $('checkoutAt').value,
     expectedReturnAt: $('checkoutDue').value,
     purpose: $('checkoutPurpose').value,
     checkoutOperator: $('checkoutOperator').value,
     checkoutCondition: $('checkoutCondition').value,
-    note: $('checkoutNote').value
+    note: $('checkoutNote').value,
+    checkoutMethod: CHECKOUT_METHOD.ADMIN
   };
 }
 
@@ -1231,6 +1307,7 @@ function openCheckout(propertyId) {
   $('checkoutBorrower').value = '';
   $('checkoutBorrowerId').value = '';
   $('checkoutDept').value = '';
+  if ($('checkoutTitle')) $('checkoutTitle').value = loadPreferredTitle();
   $('checkoutAt').value = toInputDateTime();
   const due = new Date();
   due.setDate(due.getDate() + 1);
@@ -1285,6 +1362,7 @@ function openLoanDetail(loanId) {
     ['借用人', loan.borrowerName],
     ['學號或教職員編號', loan.borrowerId],
     ['借用單位', loan.borrowerDepartment],
+    ['職稱', loan.borrowerTitle || '—'],
     ['借出時間', formatDateTime(loan.checkedOutAt)],
     ['預計歸還時間', formatDateTime(loan.expectedReturnAt)],
     ['實際歸還時間', loan.returnedAt ? formatDateTime(loan.returnedAt) : '尚未歸還'],
@@ -1707,6 +1785,7 @@ function bindEvents() {
     event.preventDefault();
     const data = readCheckoutForm();
     try {
+      if (!String(data.borrowerTitle || '').trim()) throw new Error('請填寫職稱');
       if (new Date(data.expectedReturnAt) < new Date(data.checkedOutAt)) {
         throw new Error('預計歸還時間不得早於借出時間');
       }
@@ -1715,6 +1794,7 @@ function bindEvents() {
         ['財產', `${data.propertyName}（${data.propertyId}）`],
         ['借用人', `${data.borrowerName}／${data.borrowerId}`],
         ['單位', data.borrowerDepartment],
+        ['職稱', data.borrowerTitle],
         ['借出時間', formatDateTime(new Date(data.checkedOutAt).toISOString())],
         ['預計歸還', formatDateTime(new Date(data.expectedReturnAt).toISOString())],
         ['用途', data.purpose],
@@ -1740,6 +1820,7 @@ function bindEvents() {
         ...state.pendingCheckout,
         checkoutMethod: CHECKOUT_METHOD.ADMIN
       });
+      savePreferredTitle(state.pendingCheckout.borrowerTitle);
       state.pendingCheckout = null;
       closeDialog('checkoutConfirmDialog', { silent: true });
       closeDialog('checkoutDialog', { silent: true });
@@ -1750,6 +1831,33 @@ function bindEvents() {
       if (btn) {
         btn.disabled = false;
         btn.textContent = '確認借出';
+      }
+    }
+  });
+
+  $('usageExportPreviewBtn')?.addEventListener('click', () => {
+    try {
+      renderUsageExportPage(true);
+      toast('已更新預覽清單');
+    } catch (error) {
+      toast(error.message || '預覽失敗', 'error');
+    }
+  });
+  $('usageExportDownloadBtn')?.addEventListener('click', async () => {
+    const btn = $('usageExportDownloadBtn');
+    if (btn?.disabled) return;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '產生中…';
+    }
+    try {
+      await downloadUsageExportPdf();
+    } catch (error) {
+      toast(error.message || 'PDF 匯出失敗', 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '下載 PDF';
       }
     }
   });
