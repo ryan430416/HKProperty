@@ -26,8 +26,9 @@ function isStaff(auth = authRecord()) {
   return auth.role === 'staff' || auth.role === 'admin';
 }
 
+/** 經辦與管理者皆視為最高後台權限。 */
 function isAdmin(auth = authRecord()) {
-  return auth.role === 'admin';
+  return auth.role === 'admin' || auth.role === 'staff';
 }
 
 function displayName(auth = authRecord()) {

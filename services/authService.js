@@ -27,8 +27,9 @@ export function isStaff(profile = currentProfile) {
   return profile?.role === ROLES.STAFF || profile?.role === ROLES.ADMIN;
 }
 
+/** 經辦與管理者皆視為最高後台權限（功能等同 admin）。 */
 export function isAdmin(profile = currentProfile) {
-  return profile?.role === ROLES.ADMIN;
+  return profile?.role === ROLES.ADMIN || profile?.role === ROLES.STAFF;
 }
 
 export function getSessionUser() {

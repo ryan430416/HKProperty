@@ -74,12 +74,7 @@ export async function getStaffClient(authHeader) {
   return { client, user: record };
 }
 
+/** 經辦與管理者皆可視為最高後台權限。 */
 export async function requireAdmin(authHeader) {
-  const ctx = await getStaffClient(authHeader);
-  if (ctx.user.role !== 'admin') {
-    const err = new Error('forbidden');
-    err.status = 403;
-    throw err;
-  }
-  return ctx;
+  return getStaffClient(authHeader);
 }

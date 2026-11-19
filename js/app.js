@@ -126,7 +126,6 @@ import {
   requirePocketBaseReady
 } from '../services/backendStatus.js';
 
-const STAFF_VIEWS = new Set(['staffDesk', 'audit']);
 const PAGE_META = {
   staffDesk: ['經辦工作台', '預借與借還'],
   dashboard: ['管理工作台', '系統總覽'],
@@ -211,8 +210,9 @@ function applyRoleNav() {
   const staff = isStaff();
   const admin = isAdmin();
   document.querySelectorAll('[data-min-role]').forEach((el) => {
+    // 經辦／管理者皆開最高後台選單（data-min-role=staff|admin 皆可視）
     const need = el.dataset.minRole;
-    const ok = need === 'admin' ? admin : staff;
+    const ok = need === 'admin' || need === 'staff' ? staff : false;
     el.hidden = !ok;
   });
   if ($('filterLifecycleWrap')) $('filterLifecycleWrap').hidden = !admin;
@@ -335,8 +335,9 @@ function loanDueText(item) {
 
 function allowedView(view) {
   if (!getProfile()) return null;
-  if (isAdmin() || isDemoMode()) return view;
-  return STAFF_VIEWS.has(view) ? view : null;
+  // 經辦與管理者皆可進入全部後台頁（含年度 PDF、財產、設定等）
+  if (isStaff() || isDemoMode()) return view;
+  return null;
 }
 
 function setView(view) {
@@ -2343,7 +2344,7 @@ async function bootApp() {
         // ignore
       }
     } else {
-      setView(isAdmin() ? 'dashboard' : 'staffDesk');
+      setView(isStaff() ? 'dashboard' : 'staffDesk');
     }
     toast(`已載入 ${listItems().length} 筆使用中財產`);
   } catch (error) {

@@ -24,10 +24,11 @@
     <div data-portal-step="home" class="portal-home">
       <div class="portal-actions-grid">
         <button type="button" class="portal-action" id="portalHomeReserve">預借器材</button>
+        <button type="button" class="portal-action portal-action-fill" id="portalHomeUsageFill">器材使用填報</button>
         <button type="button" class="portal-action portal-action-scan" id="portalScanBtn" hidden>掃描 QR Code</button>
         <button type="button" class="portal-action" id="portalManageOpen">查詢／取消預借</button>
       </div>
-      <p class="muted portal-foot">不需註冊或登入。只顯示財產編號、名稱、可預借狀態與取件位置。</p>
+      <p class="muted portal-foot">不需註冊或登入。預借僅顯示可預借財產；「器材使用填報」對齊年度使用紀錄欄位，填寫後即可匯出 PDF。</p>
     </div>
     <div data-portal-step="search" hidden>
       <button type="button" class="ghost-btn" id="portalBack">回首頁</button>
@@ -131,6 +132,85 @@
       <p>查詢驗證碼：<strong id="issuedToken"></strong></p>
       <button type="button" class="primary" id="portalDone">回首頁</button>
     </section>
+    <div data-portal-step="usageSearch" hidden>
+      <button type="button" class="ghost-btn" id="usageFillBackHome">回首頁</button>
+      <h2>器材使用填報</h2>
+      <p class="muted">免登入。欄位對齊年度《器材使用紀錄》：借用日期、歸還日期、用途、單位／職稱／姓名。不會把財產改成已借出。</p>
+      <form id="usageFillFilterForm" class="portal-filters">
+        <div class="field grow">
+          <label for="usageFillQuery">財產編號或名稱</label>
+          <input id="usageFillQuery" type="search" maxlength="80" placeholder="搜尋物品名稱或財編" />
+        </div>
+        <div class="field field-action">
+          <button type="submit" class="primary">搜尋</button>
+          <button type="button" class="secondary" id="usageFillClearFilters">清除</button>
+        </div>
+      </form>
+      <p id="usageFillResultMeta" class="muted"></p>
+      <div id="usageFillResults" class="portal-results" aria-live="polite"></div>
+      <div class="portal-actions" id="usageFillPager"></div>
+    </div>
+    <form data-portal-step="usageForm" id="usageFillForm" class="portal-form" hidden novalidate>
+      <button type="button" class="ghost-btn" id="usageFillFormBack">返回選財產</button>
+      <h2>填寫使用紀錄</h2>
+      <p id="usageFillAssetBox" class="portal-asset"></p>
+      <div class="field">
+        <label for="usageFillBorrowAt">借用日期 <span class="req">必填</span></label>
+        <input id="usageFillBorrowAt" type="date" required />
+        <p class="field-error" id="usageFillBorrowAtError" role="alert"></p>
+      </div>
+      <div class="field">
+        <label for="usageFillReturnAt">歸還日期 <span class="req">必填</span></label>
+        <input id="usageFillReturnAt" type="date" required />
+        <p class="field-error" id="usageFillReturnAtError" role="alert"></p>
+      </div>
+      <div class="field">
+        <label for="usageFillPurpose">借用之實際用途 <span class="req">必填</span></label>
+        <input id="usageFillPurpose" maxlength="80" placeholder="與年度表格「用途」欄相同" />
+        <p class="field-error" id="usageFillPurposeError" role="alert"></p>
+      </div>
+      <div class="field">
+        <label for="usageFillUnit">借用人單位 <span class="req">必填</span></label>
+        <input id="usageFillUnit" maxlength="50" autocomplete="organization" placeholder="系所／社團／單位" />
+        <p class="field-error" id="usageFillUnitError" role="alert"></p>
+      </div>
+      <div class="field">
+        <label for="usageFillTitle">職稱 <span class="req">必填</span></label>
+        <input id="usageFillTitle" maxlength="40" placeholder="例如：社長、公關部部員" />
+        <p class="field-error" id="usageFillTitleError" role="alert"></p>
+      </div>
+      <div class="field">
+        <label for="usageFillName">借用人姓名 <span class="req">必填</span></label>
+        <input id="usageFillName" maxlength="30" autocomplete="name" />
+        <p class="field-error" id="usageFillNameError" role="alert"></p>
+      </div>
+      <div class="field">
+        <label for="usageFillNumber">學號或教職員編號（選填）</label>
+        <input id="usageFillNumber" maxlength="40" autocomplete="off" placeholder="未填則系統自動編號" />
+        <p class="field-error" id="usageFillNumberError" role="alert"></p>
+      </div>
+      <div class="field">
+        <label for="usageFillNote">備註</label>
+        <textarea id="usageFillNote" maxlength="200" rows="2"></textarea>
+      </div>
+      <label class="choice">
+        <input id="usageFillPrivacy" type="checkbox" />
+        <span id="usageFillPrivacyText"></span>
+      </label>
+      <div class="portal-actions portal-sticky-actions">
+        <button type="submit" class="primary" id="usageFillSubmit">送出填報</button>
+      </div>
+    </form>
+    <section data-portal-step="usageDone" hidden class="portal-issued">
+      <h2>填報成功</h2>
+      <p class="muted">已寫入使用紀錄，經辦可匯出年度 PDF。此筆不會改變財產借用狀態。</p>
+      <p>財產：<strong id="usageDoneAsset"></strong></p>
+      <p>紀錄編號：<strong id="usageDoneNumber"></strong></p>
+      <div class="portal-actions">
+        <button type="button" class="primary" id="usageDoneAgain">繼續填報</button>
+        <button type="button" class="secondary" id="usageDoneHome">回首頁</button>
+      </div>
+    </section>
     <section data-portal-step="manage" hidden class="portal-manage">
       <button type="button" class="ghost-btn" id="portalManageBack">回首頁</button>
       <h2>查詢／取消預借</h2>
@@ -183,13 +263,13 @@
       <nav class="side-nav">
         <button type="button" class="nav-item" data-min-role="staff" data-view="staffDesk">經辦工作台</button>
         <button type="button" class="nav-item" data-min-role="staff" data-view="audit">財產盤點</button>
-        <button type="button" class="nav-item" data-min-role="admin" data-view="dashboard">系統總覽</button>
-        <button type="button" class="nav-item" data-min-role="admin" data-view="inventory">財產管理</button>
-        <button type="button" class="nav-item" data-min-role="admin" data-view="usage">使用紀錄</button>
+        <button type="button" class="nav-item" data-min-role="staff" data-view="dashboard">系統總覽</button>
+        <button type="button" class="nav-item" data-min-role="staff" data-view="inventory">財產管理</button>
+        <button type="button" class="nav-item" data-min-role="staff" data-view="usage">使用紀錄</button>
         <button type="button" class="nav-item" data-min-role="staff" data-view="usageExport">年度使用紀錄 PDF</button>
-        <button type="button" class="nav-item" data-min-role="admin" data-view="logs">操作紀錄</button>
-        <button type="button" class="nav-item" data-min-role="admin" data-view="users">經辦人員管理</button>
-        <button type="button" class="nav-item" data-min-role="admin" data-view="settings">資料匯出／設定</button>
+        <button type="button" class="nav-item" data-min-role="staff" data-view="logs">操作紀錄</button>
+        <button type="button" class="nav-item" data-min-role="staff" data-view="users">經辦人員管理</button>
+        <button type="button" class="nav-item" data-min-role="staff" data-view="settings">資料匯出／設定</button>
       </nav>
       <button type="button" class="scan-btn" id="scanBtn">掃描財產 QR Code</button>
       <p class="side-foot" id="sideFoot">經辦與管理者須登入後使用後台</p>

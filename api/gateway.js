@@ -1,6 +1,7 @@
 import { clientError } from '../server/http.js';
 import { logApiRequest } from '../server/safeLog.js';
 import publicAssets from '../server/handlers/publicAssets.js';
+import publicUsageLog from '../server/handlers/publicUsageLog.js';
 import reservationsCreate from '../server/handlers/reservationsCreate.js';
 import reservationsLookup from '../server/handlers/reservationsLookup.js';
 import reservationsCancel from '../server/handlers/reservationsCancel.js';
@@ -17,6 +18,7 @@ import adminOperationLogs from '../server/handlers/adminOperationLogs.js';
 
 const routes = new Map([
   ['/api/public/assets', publicAssets],
+  ['/api/public/usage-log', publicUsageLog],
   ['/api/reservations/create', reservationsCreate],
   ['/api/reservations/lookup', reservationsLookup],
   ['/api/reservations/cancel', reservationsCancel],

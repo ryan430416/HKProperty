@@ -8,12 +8,21 @@ import {
   listPublicAssets,
   lookupReservation
 } from '../services/v2Api.js';
+import {
+  USAGE_FILL_PRIVACY,
+  listUsageFillAssets,
+  submitPublicUsageFill,
+  validateUsageFill
+} from '../services/publicUsageLog.js';
 
 let selected = null;
+let usageSelected = null;
 let cameraOn = false;
 let submitting = false;
 let searchTimer = 0;
+let usageSearchTimer = 0;
 let currentPage = 1;
+let usagePage = 1;
 const failWindow = { count: 0, at: 0 };
 
 function $(id) {
@@ -283,10 +292,224 @@ function showIssued(result) {
   selected = null;
 }
 
+function clearUsageFieldErrors() {
+  ['usageFillBorrowAt', 'usageFillReturnAt', 'usageFillPurpose', 'usageFillUnit', 'usageFillTitle', 'usageFillName', 'usageFillNumber'].forEach((id) => {
+    const input = $(id);
+    const err = $(`${id}Error`);
+    if (input) input.removeAttribute('aria-invalid');
+    if (err) err.textContent = '';
+  });
+}
+
+function setUsageFieldError(id, message) {
+  const input = $(id);
+  const err = $(`${id}Error`);
+  if (input) input.setAttribute('aria-invalid', message ? 'true' : 'false');
+  if (err) err.textContent = message || '';
+}
+
+function validateUsageFormFields() {
+  clearUsageFieldErrors();
+  const payload = {
+    propertyId: usageSelected?.propertyId,
+    assetId: usageSelected?.id,
+    unit: $('usageFillUnit')?.value,
+    title: $('usageFillTitle')?.value,
+    name: $('usageFillName')?.value,
+    purpose: $('usageFillPurpose')?.value,
+    borrowedAt: $('usageFillBorrowAt')?.value,
+    returnedAt: $('usageFillReturnAt')?.value,
+    borrowerNumber: $('usageFillNumber')?.value,
+    privacyAck: Boolean($('usageFillPrivacy')?.checked)
+  };
+  const message = validateUsageFill(payload);
+  if (!message) return payload;
+
+  if (message.includes('財產')) showMessage(message, 'error');
+  else if (message.includes('單位')) setUsageFieldError('usageFillUnit', message);
+  else if (message.includes('職稱')) setUsageFieldError('usageFillTitle', message);
+  else if (message.includes('姓名')) setUsageFieldError('usageFillName', message);
+  else if (message.includes('用途')) setUsageFieldError('usageFillPurpose', message);
+  else if (message.includes('借用日期')) setUsageFieldError('usageFillBorrowAt', message);
+  else if (message.includes('歸還')) setUsageFieldError('usageFillReturnAt', message);
+  else if (message.includes('學號')) setUsageFieldError('usageFillNumber', message);
+  else if (message.includes('個資')) showMessage(message, 'error');
+  else showMessage(message, 'error');
+  return null;
+}
+
+function showUsageSkeleton() {
+  const list = $('usageFillResults');
+  if (!list) return;
+  list.innerHTML = Array.from({ length: 4 }, () => `
+    <article class="portal-card portal-skeleton" aria-hidden="true">
+      <div class="asset-glyph"></div>
+      <div class="portal-card-body">
+        <div class="sk-line"></div>
+        <div class="sk-line short"></div>
+        <div class="sk-line mid"></div>
+      </div>
+    </article>
+  `).join('');
+  if ($('usageFillResultMeta')) $('usageFillResultMeta').textContent = '財產資料載入中…';
+  if ($('usageFillPager')) $('usageFillPager').innerHTML = '';
+}
+
+function renderUsageAssets(payload) {
+  const list = $('usageFillResults');
+  if (!list) return;
+  const items = payload.items || [];
+  if (!items.length) {
+    list.innerHTML = '<div class="portal-empty"><p>目前沒有符合條件的財產。</p></div>';
+    if ($('usageFillResultMeta')) $('usageFillResultMeta').textContent = '共 0 筆';
+    if ($('usageFillPager')) $('usageFillPager').innerHTML = '';
+    return;
+  }
+  list.innerHTML = items.map((item) => `
+    <article class="portal-card">
+      ${categoryIcon(item.name)}
+      <div class="portal-card-body">
+        <strong class="portal-name">${esc(item.name)}</strong>
+        <p class="pid">${esc(item.propertyId)}</p>
+        <p class="portal-meta">${esc(item.location || '未填位置')}</p>
+        <div class="portal-actions">
+          <button type="button" class="primary" data-usage-pick="${esc(item.id)}">填報此財產</button>
+        </div>
+      </div>
+    </article>
+  `).join('');
+  list.querySelectorAll('[data-usage-pick]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      usageSelected = items.find((item) => item.id === btn.dataset.usagePick) || null;
+      openUsageForm();
+    });
+  });
+  if ($('usageFillResultMeta')) {
+    $('usageFillResultMeta').textContent = `共 ${payload.totalItems} 筆，第 ${payload.page} / ${payload.totalPages} 頁`;
+  }
+  const pager = $('usageFillPager');
+  if (!pager) return;
+  pager.innerHTML = `
+    <button type="button" class="secondary" id="usageFillPrevPage" ${payload.page <= 1 ? 'disabled' : ''}>上一頁</button>
+    <button type="button" class="secondary" id="usageFillNextPage" ${payload.page >= payload.totalPages ? 'disabled' : ''}>下一頁</button>
+  `;
+  $('usageFillPrevPage')?.addEventListener('click', () => loadUsageAssets(payload.page - 1));
+  $('usageFillNextPage')?.addEventListener('click', () => loadUsageAssets(payload.page + 1));
+}
+
+async function loadUsageAssets(page = 1) {
+  usagePage = Math.max(1, page);
+  showMessage('');
+  showUsageSkeleton();
+  try {
+    const payload = await listUsageFillAssets({
+      q: $('usageFillQuery')?.value || '',
+      page: usagePage,
+      perPage: 12
+    });
+    renderUsageAssets(payload);
+  } catch (error) {
+    const list = $('usageFillResults');
+    if (list) {
+      list.innerHTML = `
+        <div class="portal-empty">
+          <p>${esc(error.message || '無法載入財產資料')}</p>
+          <button type="button" class="primary" id="usageFillReloadBtn">重新載入</button>
+        </div>
+      `;
+      $('usageFillReloadBtn')?.addEventListener('click', () => loadUsageAssets(usagePage));
+    }
+    if ($('usageFillResultMeta')) $('usageFillResultMeta').textContent = '';
+    if ($('usageFillPager')) $('usageFillPager').innerHTML = '';
+  }
+}
+
+function openUsageSearch() {
+  usageSelected = null;
+  showMessage('');
+  setStep('usageSearch');
+  loadUsageAssets(1);
+}
+
+function openUsageForm() {
+  clearUsageFieldErrors();
+  showMessage('');
+  if ($('usageFillPrivacyText')) $('usageFillPrivacyText').textContent = USAGE_FILL_PRIVACY;
+  if (usageSelected && $('usageFillAssetBox')) {
+    $('usageFillAssetBox').innerHTML = `${categoryIcon(usageSelected.name)} <span><strong class="portal-name">${esc(usageSelected.name)}</strong><br><span class="pid">${esc(usageSelected.propertyId)}</span> · ${esc(usageSelected.location || '未填位置')}</span>`;
+  }
+  setStep('usageForm');
+}
+
+function scheduleUsageSearch() {
+  window.clearTimeout(usageSearchTimer);
+  usageSearchTimer = window.setTimeout(() => loadUsageAssets(1), 280);
+}
+
 export function bindPublicPortal(onStaffLogin) {
   $('staffLoginOpen')?.addEventListener('click', onStaffLogin);
   $('portalHomeReserve')?.addEventListener('click', () => openSearch());
   $('portalHomeBorrow')?.addEventListener('click', () => openSearch());
+  $('portalHomeUsageFill')?.addEventListener('click', () => openUsageSearch());
+  $('usageFillBackHome')?.addEventListener('click', () => { showMessage(''); setStep('home'); });
+  $('usageFillFormBack')?.addEventListener('click', () => { showMessage(''); setStep('usageSearch'); });
+  $('usageFillFilterForm')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    loadUsageAssets(1);
+  });
+  $('usageFillClearFilters')?.addEventListener('click', () => {
+    if ($('usageFillQuery')) $('usageFillQuery').value = '';
+    loadUsageAssets(1);
+  });
+  $('usageFillQuery')?.addEventListener('input', scheduleUsageSearch);
+  $('usageFillForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (submitting) return;
+    if (tooManyFails()) {
+      showMessage('嘗試次數過多，請稍後再試。', 'error');
+      return;
+    }
+    const payload = validateUsageFormFields();
+    if (!payload) return;
+    const btn = $('usageFillSubmit');
+    submitting = true;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '送出中…';
+    }
+    showMessage('');
+    try {
+      const result = await submitPublicUsageFill({
+        ...payload,
+        note: $('usageFillNote')?.value || ''
+      });
+      if ($('usageDoneAsset')) {
+        $('usageDoneAsset').textContent = `${result.propertyName || usageSelected?.name || ''}（${result.propertyId || usageSelected?.propertyId || ''}）`;
+      }
+      if ($('usageDoneNumber')) $('usageDoneNumber').textContent = result.loanNumber || '—';
+      $('usageFillForm')?.reset();
+      clearUsageFieldErrors();
+      usageSelected = null;
+      setStep('usageDone');
+    } catch (error) {
+      noteFail();
+      const map = {
+        service_unavailable: '公開填報服務尚未就緒，請稍後再試或洽經辦',
+        asset_not_found: '找不到財產，請重新選擇',
+        duplicate_entry: '已有相同財產、借用日與借用人的紀錄',
+        privacy_required: '請勾選個資使用告知'
+      };
+      showMessage(map[error.code] || error.message || '送出失敗', 'error');
+    } finally {
+      submitting = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '送出填報';
+      }
+    }
+  });
+  $('usageDoneAgain')?.addEventListener('click', () => openUsageSearch());
+  $('usageDoneHome')?.addEventListener('click', () => { showMessage(''); setStep('home'); });
   $('portalManageOpen')?.addEventListener('click', () => { showMessage(''); setStep('manage'); });
   $('portalManageBack')?.addEventListener('click', () => { showMessage(''); setStep('home'); });
   if (FEATURES.qrScanner) {

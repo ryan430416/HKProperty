@@ -31,7 +31,9 @@ function isStaff(auth) {
 }
 
 function isAdmin(auth) {
-  return roleOf(auth) === 'admin';
+  // 經辦與管理者皆視為最高後台權限
+  var role = roleOf(auth);
+  return role === 'admin' || role === 'staff';
 }
 
 function displayName(auth) {
