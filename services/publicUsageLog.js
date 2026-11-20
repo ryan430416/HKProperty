@@ -141,7 +141,24 @@ async function createDirect(payload, asset) {
     status: 'returned',
     note: collapse(payload.note) || '公開器材使用紀錄填報'
   };
-  const rec = await client.collection(PB.loans).create(body);
+  // 不帶 Authorization，避免殘留登入 token 擋住公開 createRule
+  const response = await fetch(`${client.baseUrl}/api/collections/${PB.loans}/records`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  let rec = null;
+  try {
+    rec = await response.json();
+  } catch {
+    rec = null;
+  }
+  if (!response.ok) {
+    const err = new Error(rec?.message || '無法寫入使用紀錄');
+    err.status = response.status;
+    err.data = rec;
+    throw err;
+  }
   return {
     id: rec.id,
     loanNumber: rec.loan_number,
@@ -187,9 +204,15 @@ export async function submitPublicUsageFill(payload) {
   if (gateway.status >= 200 && gateway.status < 300 && gateway.data?.loanNumber) {
     return { ...gateway.data, via: 'gateway' };
   }
-  if (gateway.status === 503 || gateway.data?.error === 'service_unavailable') {
-    /* fall through */
-  } else if (gateway.status && gateway.status !== 404) {
+  // 503／404／403（service 規則未開）都改走 hook／直寫，避免正式站卡死
+  const gatewaySoft = new Set([403, 404, 503]);
+  const gatewayCode = String(gateway.data?.error || '');
+  if (
+    gateway.status
+    && !gatewaySoft.has(gateway.status)
+    && gatewayCode !== 'service_unavailable'
+    && gatewayCode !== 'forbidden'
+  ) {
     const err = new Error(gateway.data?.message || gateway.data?.error || '送出失敗');
     err.code = gateway.data?.error || 'request_failed';
     err.status = gateway.status;

@@ -167,7 +167,17 @@ export async function loadLoans() {
     setOverdueAssetIds(cache.filter((loan) => loan.isOverdue).map((loan) => loan.assetId));
     return cache;
   }
-    const rows = await getFullList(PB.loans, { sort: '-requested_at' });
+  let rows;
+  try {
+    rows = await getFullList(PB.loans, { sort: '-requested_at' });
+  } catch (error) {
+    // 部分環境對 sort／權限較敏感：改無排序再試一次
+    try {
+      rows = await getFullList(PB.loans, {});
+    } catch {
+      throw error;
+    }
+  }
   cache = (rows || []).map(mapLoan);
   setOverdueAssetIds(cache.filter((loan) => loan.isOverdue).map((loan) => loan.assetId));
   return cache;

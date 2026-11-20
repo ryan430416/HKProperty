@@ -777,6 +777,14 @@ function ensureUsageExportDefaults() {
   if (yearInput && !yearInput.value) yearInput.value = String(currentRocYear());
 }
 
+async function ensureUsageExportData() {
+  try {
+    await Promise.all([loadCatalog(), loadLoans()]);
+  } catch (error) {
+    throw new Error(error.message || '無法載入借用紀錄，請重新登入後再試');
+  }
+}
+
 function renderUsageExportPage(force = false) {
   ensureUsageExportDefaults();
   const year = Number($('usageExportYear')?.value || currentRocYear());
@@ -1027,7 +1035,11 @@ function render() {
   if (state.view === 'reservations') renderReservationManage();
   if (state.view === 'audit') renderAuditPage();
   if (state.view === 'usage') renderUsagePage();
-  if (state.view === 'usageExport') renderUsageExportPage();
+  if (state.view === 'usageExport') {
+    ensureUsageExportData()
+      .then(() => renderUsageExportPage())
+      .catch((error) => toast(error.message || '無法載入年度使用紀錄', 'error'));
+  }
   if (state.view === 'locations') renderLocations();
   if (state.view === 'logs') renderLogs();
   if (state.view === 'users') renderUsers();
@@ -1836,8 +1848,9 @@ function bindEvents() {
     }
   });
 
-  $('usageExportPreviewBtn')?.addEventListener('click', () => {
+  $('usageExportPreviewBtn')?.addEventListener('click', async () => {
     try {
+      await ensureUsageExportData();
       renderUsageExportPage(true);
       toast('已更新預覽清單');
     } catch (error) {
@@ -1852,6 +1865,7 @@ function bindEvents() {
       btn.textContent = '產生中…';
     }
     try {
+      await ensureUsageExportData();
       await downloadUsageExportPdf();
     } catch (error) {
       toast(error.message || 'PDF 匯出失敗', 'error');
